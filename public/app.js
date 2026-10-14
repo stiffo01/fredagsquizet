@@ -6,7 +6,7 @@ const escapeHTML = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'
 const randomToken = () => Array.from(crypto.getRandomValues(new Uint8Array(24)), b => b.toString(16).padStart(2, '0')).join('');
 let ownerToken = localStorage.getItem('quizpop-owner');
 if (!ownerToken) { ownerToken = randomToken(); localStorage.setItem('quizpop-owner', ownerToken); }
-let stream, roomState, session, timer, pasteUploadHandler, quizzes = [], draft, routeVersion = 0;
+let stream, roomState, session, timer, pasteUploadHandler, autosaveTimer, autosaveTask, autosavePending = false, quizzes = [], draft, routeVersion = 0;
 const questionTypes = {'quiz':'Multiple choice', 'true-false':'True or false', 'type-answer':'Type an answer', 'poll':'Poll'};
 const playerEmojis = ['😀', '😎', '🤓', '🥳', '🐸', '🦊', '🐼', '🐙', '🦄', '🐧', '🐢', '🦖', '🍕', '🚀', '⭐', '👾'];
 const newQuestion = () => ({type:'quiz', question:'', image:'', imageAlt:'', answers:['','','',''], correctIndex:0, timeLimit:20});
@@ -75,6 +75,63 @@ function readDraft() {
     timeLimit: Number(el.querySelector('[data-time]').value)
   }));
 }
+const draftKey = value => `quizpop-draft-${value.id || 'new'}`;
+function cacheDraft(value = draft) {
+  try { localStorage.setItem(draftKey(value), JSON.stringify(value)); } catch { /* Server autosave remains available. */ }
+}
+function restoreDraft(value) {
+  try {
+    const cached = JSON.parse(localStorage.getItem(draftKey(value)) || 'null');
+    return cached && cached.id === value.id ? cached : value;
+  } catch { return value; }
+}
+function draftIsComplete(value) {
+  return !!value.title?.trim() && value.title.length <= 120 && value.questions.length > 0 && value.questions.length <= 50 && value.questions.every(q => {
+    if (!q.question?.trim() || q.question.length > 500 || q.timeLimit < 1 || q.timeLimit > 120) return false;
+    if (q.type === 'type-answer') return q.acceptedAnswers?.length > 0 && q.acceptedAnswers.length <= 10 && q.acceptedAnswers.every(answer => answer.length <= 200);
+    return q.answers?.length >= 2 && q.answers.length <= 4 && q.answers.every(answer => answer.trim() && answer.length <= 200) && (q.type === 'poll' || q.correctIndex < q.answers.length);
+  });
+}
+function scheduleDraftSave() {
+  if (!draft || !document.querySelector('#editor-form')) return;
+  try { readDraft(); cacheDraft(); } catch { /* Keep the latest previously captured draft. */ }
+  const status = document.querySelector('#save-status');
+  if (status) status.textContent = 'Saving changes…';
+  clearTimeout(autosaveTimer);
+  autosaveTimer = setTimeout(() => { void persistDraft(); }, 700);
+}
+async function persistDraft() {
+  if (autosaveTask) { autosavePending = true; return autosaveTask; }
+  autosaveTask = (async () => {
+    do {
+      autosavePending = false;
+      const version = routeVersion, target = draft;
+      try { readDraft(); cacheDraft(); } catch { continue; }
+      if (version !== routeVersion || !draftIsComplete(target)) {
+        const status = document.querySelector('#save-status');
+        if (status && version === routeVersion) status.textContent = 'Saved on this device · finish required fields to sync';
+        continue;
+      }
+      const wasNew = !target.id;
+      try {
+        const saved = await api(target.id ? `/quizzes/${target.id}` : '/quizzes', {method:target.id ? 'PUT' : 'POST', body:target});
+        if (version !== routeVersion || target !== draft) continue;
+        if (wasNew) {
+          target.id = saved.id;
+          history.replaceState(null, '', `/host#edit/${encodeURIComponent(saved.id)}`);
+          try { localStorage.removeItem('quizpop-draft-new'); } catch {}
+        }
+        cacheDraft(target);
+        const status = document.querySelector('#save-status');
+        if (status) status.textContent = 'All changes saved';
+      } catch {
+        const status = document.querySelector('#save-status');
+        if (status && version === routeVersion) status.textContent = 'Saved on this device · server sync will retry';
+      }
+    } while (autosavePending);
+  })();
+  try { await autosaveTask; } finally { autosaveTask = null; }
+}
 const defaultPicture = q => `/images/${Object.hasOwn(questionTypes, q.type) ? q.type : 'quiz'}.svg`;
 function editorQuestion(q, i) {
   const type = q.type || 'quiz';
@@ -94,18 +151,21 @@ function editorQuestion(q, i) {
 }
 function editor() {
   if (pasteUploadHandler) document.removeEventListener('paste', pasteUploadHandler, true);
-  app.innerHTML = `<section class="shell editor"><div class="topline"><div><p class="eyebrow">Make it your own</p><h1>${draft.id ? 'Edit your quiz' : 'A great game starts here.'}</h1><p>Mix question types, add pictures, and set the pace.</p></div><a class="btn ghost" href="/host#host">Back to library</a></div><form id="editor-form"><label class="field" for="quiz-title">Quiz title</label><input class="input editor-title" id="quiz-title" placeholder="Give your quiz a name" maxlength="120" required value="${escapeHTML(draft.title)}"><section class="card image-editor quiz-cover-editor"><h2 class="question-heading">Quiz cover picture</h2>${draft.coverImage ? `<img class="editor-cover" src="${escapeHTML(draft.coverImage)}" alt="${escapeHTML(draft.coverImageAlt || 'Quiz cover picture')}"><button class="btn subtle" type="button" data-remove-cover>Remove cover picture</button>` : `<img class="default-image" src="/images/quiz.svg" alt="Colourful quiz-themed cover"><p class="small">Standard quiz artwork is used on the library card until you add a cover.</p>`}<button class="btn subtle paste-target" type="button" data-cover-paste>Paste cover picture here · Ctrl+V / ⌘V</button><label class="field" for="cover-image">${draft.coverImage ? 'Replace cover picture' : 'Upload cover picture'}</label><input class="input" id="cover-image" type="file" accept="image/png,image/jpeg,image/webp,image/gif" data-cover-image><p class="small">Copy an image, click here and press Ctrl+V (⌘V on Mac), or choose a file. PNG, JPEG, WebP or GIF · up to 50 MB.</p>${draft.coverImage ? `<label class="field" for="cover-alt">Picture description</label><input class="input" id="cover-alt" data-cover-alt maxlength="200" placeholder="Describe the cover picture" value="${escapeHTML(draft.coverImageAlt || '')}">` : ''}</section>${draft.questions.map(editorQuestion).join('')}<div class="savebar"><button class="btn ghost" id="add-question" type="button" ${draft.questions.length >= 50 ? 'disabled' : ''}>＋ Add question</button><button class="btn light" type="submit">Save quiz ✓</button></div></form></section>`;
-  document.querySelector('#add-question').onclick = () => { readDraft(); draft.questions.push(newQuestion()); editor(); app.querySelectorAll('.question-editor')[draft.questions.length - 1].scrollIntoView({block:'center',behavior:'smooth'}); };
-  app.querySelectorAll('[data-remove]').forEach(button => button.onclick = () => { readDraft(); draft.questions.splice(Number(button.dataset.remove), 1); editor(); });
+  app.innerHTML = `<section class="shell editor"><div class="topline"><div><p class="eyebrow">Make it your own</p><h1>${draft.id ? 'Edit your quiz' : 'A great game starts here.'}</h1><p>Mix question types, add pictures, and set the pace.</p></div><a class="btn ghost" href="/host#host">Back to library</a></div><form id="editor-form"><label class="field" for="quiz-title">Quiz title</label><input class="input editor-title" id="quiz-title" placeholder="Give your quiz a name" maxlength="120" required value="${escapeHTML(draft.title)}"><section class="card image-editor quiz-cover-editor"><h2 class="question-heading">Quiz cover picture</h2>${draft.coverImage ? `<img class="editor-cover" src="${escapeHTML(draft.coverImage)}" alt="${escapeHTML(draft.coverImageAlt || 'Quiz cover picture')}"><button class="btn subtle" type="button" data-remove-cover>Remove cover picture</button>` : `<img class="default-image" src="/images/quiz.svg" alt="Colourful quiz-themed cover"><p class="small">Standard quiz artwork is used on the library card until you add a cover.</p>`}<button class="btn subtle paste-target" type="button" data-cover-paste>Paste cover picture here · Ctrl+V / ⌘V</button><label class="field" for="cover-image">${draft.coverImage ? 'Replace cover picture' : 'Upload cover picture'}</label><input class="input" id="cover-image" type="file" accept="image/png,image/jpeg,image/webp,image/gif" data-cover-image><p class="small">Copy an image, click here and press Ctrl+V (⌘V on Mac), or choose a file. PNG, JPEG, WebP or GIF · up to 50 MB.</p>${draft.coverImage ? `<label class="field" for="cover-alt">Picture description</label><input class="input" id="cover-alt" data-cover-alt maxlength="200" placeholder="Describe the cover picture" value="${escapeHTML(draft.coverImageAlt || '')}">` : ''}</section>${draft.questions.map(editorQuestion).join('')}<div class="savebar"><button class="btn ghost" id="add-question" type="button" ${draft.questions.length >= 50 ? 'disabled' : ''}>＋ Add question</button><span class="small" id="save-status" role="status" aria-live="polite">${draftIsComplete(draft) ? 'Changes will save automatically' : 'Your work is saved on this device as you type'}</span><button class="btn light" type="submit">Save quiz ✓</button></div></form></section>`;
+  const form = document.querySelector('#editor-form');
+  form.addEventListener('input', scheduleDraftSave);
+  form.addEventListener('change', scheduleDraftSave);
+  document.querySelector('#add-question').onclick = () => { readDraft(); draft.questions.push(newQuestion()); editor(); scheduleDraftSave(); app.querySelectorAll('.question-editor')[draft.questions.length - 1].scrollIntoView({block:'center',behavior:'smooth'}); };
+  app.querySelectorAll('[data-remove]').forEach(button => button.onclick = () => { readDraft(); draft.questions.splice(Number(button.dataset.remove), 1); editor(); scheduleDraftSave(); });
   app.querySelectorAll('[data-type]').forEach(select => select.onchange = () => {
     readDraft(); const q = draft.questions[Number(select.dataset.type)];
     if (q.type === 'true-false') { q.answers = ['True','False']; q.correctIndex = Math.min(q.correctIndex, 1); }
     else if (q.type !== 'type-answer' && q.answers.length < 2) q.answers = ['','','',''];
     if (q.type === 'type-answer' && !q.acceptedAnswers?.length) q.acceptedAnswers = [''];
-    editor();
+    editor(); scheduleDraftSave();
   });
-  app.querySelectorAll('[data-remove-image]').forEach(button => button.onclick = () => { readDraft(); draft.questions[Number(button.dataset.removeImage)].image = ''; editor(); });
-  app.querySelector('[data-remove-cover]')?.addEventListener('click', () => { readDraft(); draft.coverImage = ''; draft.coverImageAlt = ''; editor(); });
+  app.querySelectorAll('[data-remove-image]').forEach(button => button.onclick = () => { readDraft(); draft.questions[Number(button.dataset.removeImage)].image = ''; editor(); scheduleDraftSave(); });
+  app.querySelector('[data-remove-cover]')?.addEventListener('click', () => { readDraft(); draft.coverImage = ''; draft.coverImageAlt = ''; editor(); scheduleDraftSave(); });
   let uploading = false;
   const uploadPicture = async (file, target) => {
     if (!file) return;
@@ -123,7 +183,7 @@ function editor() {
         else draft.questions[target].image = result.image;
       }
     } catch (error) { toast(error.message || 'This picture could not be read. Try a PNG or JPEG.'); }
-    finally { uploading = false; if (version === routeVersion) editor(); }
+    finally { uploading = false; if (version === routeVersion) { editor(); scheduleDraftSave(); } }
   };
   app.querySelectorAll('[data-image]').forEach(input => input.onchange = () => uploadPicture(input.files[0], Number(input.dataset.image)));
   app.querySelector('[data-cover-image]').onchange = event => uploadPicture(event.target.files[0], 'cover');
@@ -155,9 +215,13 @@ function editor() {
   };
   document.addEventListener('paste', pasteUploadHandler, true);
   document.querySelector('#editor-form').onsubmit = event => { event.preventDefault(); run(event.submitter, async () => {
+    clearTimeout(autosaveTimer);
+    if (autosaveTask) await autosaveTask;
     readDraft(); const version = routeVersion;
     await api(draft.id ? `/quizzes/${draft.id}` : '/quizzes', {method:draft.id ? 'PUT' : 'POST', body:draft});
-    if (version !== routeVersion) return; draft = null; location.href = '/host#host';
+    if (version !== routeVersion) return;
+    try { localStorage.removeItem(draftKey(draft)); } catch {}
+    draft = null; location.href = '/host#host';
   }); };
 }
 function saveSession(value) { session = value; sessionStorage.setItem(`quizpop-${value.role}-${value.pin}`,JSON.stringify(value)); location.hash=`room/${value.role}/${value.pin}`; }
@@ -249,10 +313,10 @@ async function route() {
   if ((['host','create','edit'].includes(page) || (page === 'room' && arg === 'host')) && location.pathname !== '/host') { location.replace(`/host${location.hash}`); return; }
   try {
     if(page==='host')await library(version);
-    else if(page==='create'){draft={title:'',questions:[newQuestion()]};editor();}
+    else if(page==='create'){draft=restoreDraft({title:'',questions:[newQuestion()]});editor();}
     else if(page==='edit'){
       draft=await api(`/quizzes/${encodeURIComponent(arg)}`);if(version!==routeVersion)return;
-      if(draft.id==='sample'){delete draft.id;draft.title+=' (copy)';}editor();
+      if(draft.id==='sample'){delete draft.id;draft.title+=' (copy)';}else draft=restoreDraft(draft);editor();
     }else if(page==='room')await connectRoom(arg,pin,version);
     else joinPage(page==='join'&&/^\d{6}$/.test(arg)?arg:'');
   } catch(error){if(version!==routeVersion)return;app.innerHTML=`<section class="join"><div class="card"><h1>Couldn't open that.</h1><p>${escapeHTML(error.message)}</p><a class="btn wide" href="#">Back to join</a><a class="btn subtle wide" href="/host#host">Quiz library</a></div></section>`;}
