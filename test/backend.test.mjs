@@ -218,6 +218,8 @@ test('mixed question types validate, preserve preview secrecy, and score typed a
   state = (await host('open')).data;
   assert.deepEqual(state.question.answers,['True','False']);
   assert.equal((await host('open')).status,409,'opening twice must not restart the timer');
+  assert.equal((await host('toggle-view')).data.answerOnly,true,'the host can switch true/false question layouts too');
+  assert.equal((await host('toggle-view')).data.answerOnly,false);
   await answer(alice,{questionIndex:0,answerIndex:0});await answer(bob,{questionIndex:0,answerIndex:1});
   state = (await f.request(`${route}/state`,{token:alice})).data;
   assert.equal(state.status,'reveal');assert.equal(state.question.revealImage,'/media/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.png');

@@ -302,7 +302,7 @@ export function createApp({ dataDir = process.env.DATA_DIR || path.join(baseDir,
           if (action === 'open') { if (room.status !== 'preview') fail(409, 'The question is not in preview.'); openAnswers(room); }
           if (action === 'next') { if (room.status === 'question') reveal(room); else if (room.status === 'reveal') advance(room); else fail(409, 'No next question available.'); }
           if (action === 'toggle-view') {
-            if (room.status !== 'question' || room.quiz.questions[room.index].answers?.length !== 4) fail(409, 'The display can only be changed during a four-answer question.');
+            if (room.status !== 'question' || (room.quiz.questions[room.index].answers?.length ?? 0) < 2) fail(409, 'The display can only be changed during a multiple-choice question.');
             room.answerOnly = !room.answerOnly; broadcast(room);
           }
           if (action === 'show-scoreboard') {
