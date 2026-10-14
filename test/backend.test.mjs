@@ -98,6 +98,8 @@ test('multiplayer flow enforces authorization, secrecy, one answer, scoring and 
   await request(`${route}/answer`, { method: 'POST', token: bob, body: { answerIndex: 1, questionIndex: 0 } });
   state = (await request(`${route}/state`, { token: alice })).data;
   assert.equal(state.status, 'reveal'); assert.equal(state.question.correctIndex, 0); assert.equal(state.self.correct, true); assert.ok(state.self.points >= 500); assert.equal(state.leaderboard[0].nickname, 'Alice');
+  assert.equal(state.leaderboard.find(player => player.nickname === 'Alice').correctAnswers, 1);
+  assert.equal(state.leaderboard.find(player => player.nickname === 'Bob').correctAnswers, 0);
   state = (await request(`${route}/next`, { method: 'POST', token: room.hostToken })).data;
   assert.equal(state.status, 'preview'); assert.equal(state.answeredCount, 0);
   state = (await request(`${route}/open`, { method: 'POST', token: room.hostToken })).data;
@@ -114,6 +116,7 @@ test('multiplayer flow enforces authorization, secrecy, one answer, scoring and 
   assert.equal(state.scoreboardVisible, false);
   state = (await request(`${route}/show-scoreboard`, { method: 'POST', token: room.hostToken })).data;
   assert.equal(state.scoreboardVisible, true);
+  assert.ok(state.scoreboardShownAt > 0);
   assert.equal((await request(`${route}/state`, { token: alice })).data.scoreboardVisible, true, 'the final scoreboard is shared with players');
   state = (await request(`${route}/clear-scoreboard`, { method: 'POST', token: room.hostToken })).data;
   assert.equal(state.scoreboardDeleted, true);
@@ -179,7 +182,7 @@ test('SSE sends authorized state and reconnects using the same player token', as
 test('mixed question types validate, preserve preview secrecy, and score typed answers and polls', async t => {
   const f = await fixture(t);
   const mixed = {title:'Mixed quiz',questions:[
-    {type:'true-false',question:'The sky is blue.',correctIndex:0,timeLimit:1},
+    {type:'true-false',question:'The sky is blue.',correctIndex:0,revealImage:'/media/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.png',revealImageAlt:'Earth from space',showRevealImage:true,timeLimit:1},
     {type:'type-answer',question:'Name the city.',acceptedAnswers:['New York','NYC'],timeLimit:30},
     {type:'poll',question:'Pick a color.',answers:['Red','Blue'],timeLimit:30}
   ]};
@@ -194,11 +197,15 @@ test('mixed question types validate, preserve preview secrecy, and score typed a
   let state = (await f.request(`${route}/state`,{token:alice})).data;
   assert.equal(state.status,'preview','preview does not consume the answer timer');
   assert.deepEqual(Object.keys(state.question).sort(),['type','question','image','imageAlt','timeLimit'].sort());
+  assert.equal(state.question.revealImage,undefined,'the explanation image stays hidden during preview');
   assert.equal((await host('next')).status,409);
   state = (await host('open')).data;
   assert.deepEqual(state.question.answers,['True','False']);
   assert.equal((await host('open')).status,409,'opening twice must not restart the timer');
   await answer(alice,{questionIndex:0,answerIndex:0});await answer(bob,{questionIndex:0,answerIndex:1});
+  state = (await f.request(`${route}/state`,{token:alice})).data;
+  assert.equal(state.status,'reveal');assert.equal(state.question.revealImage,'/media/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.png');
+  assert.equal(state.question.revealImageAlt,'Earth from space');
   state = (await host('next')).data;
   assert.equal(state.status,'preview'); assert.equal(state.question.acceptedAnswers,undefined);
   await host('open');

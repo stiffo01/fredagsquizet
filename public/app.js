@@ -9,7 +9,7 @@ if (!ownerToken) { ownerToken = randomToken(); localStorage.setItem('quizpop-own
 let stream, roomState, session, timer, autosaveTimer, autosaveTask, autosavePending = false, quizzes = [], draft, routeVersion = 0;
 const questionTypes = {'quiz':'Multiple choice', 'true-false':'True or false', 'type-answer':'Type an answer', 'poll':'Poll'};
 const playerEmojis = ['😀', '😎', '🤓', '🥳', '🐸', '🦊', '🐼', '🐙', '🦄', '🐧', '🐢', '🦖', '🍕', '🚀', '⭐', '👾'];
-const newQuestion = () => ({type:'quiz', question:'', image:'', imageAlt:'', answers:['','','',''], correctIndex:0, timeLimit:20});
+const newQuestion = () => ({type:'quiz', question:'', image:'', imageAlt:'', revealImage:'', revealImageAlt:'', showRevealImage:false, answers:['','','',''], correctIndex:0, timeLimit:20});
 function toast(message) { const el = document.querySelector('#toast'); el.textContent = message; el.hidden = false; clearTimeout(toast.timeout); toast.timeout = setTimeout(() => el.hidden = true, 6000); }
 async function api(path, {method='GET', body, token=ownerToken} = {}) {
   const authHeaders = token === ownerToken ? {'X-Quiz-Owner':token}
@@ -70,6 +70,9 @@ function readDraft() {
     type: el.querySelector('[data-type]').value,
     question: el.querySelector('[data-question]').value,
     imageAlt: el.querySelector('[data-image-alt]')?.value || '',
+    revealImage: draft.questions[i].revealImage || '',
+    revealImageAlt: el.querySelector('[data-reveal-image-alt]')?.value || '',
+    showRevealImage: el.querySelector('[data-reveal-image]')?.checked || false,
     answers: [...el.querySelectorAll('[data-answer]')].map(input => input.value),
     acceptedAnswers: (el.querySelector('[data-accepted]')?.value || '').split('\n').map(answer => answer.trim()).filter(Boolean),
     correctIndex: Number(el.querySelector('input[type=radio]:checked')?.value || 0),
@@ -203,7 +206,7 @@ function editorQuestion(q, i) {
     <div class="question-heading"><h2>Question ${i + 1}</h2><button class="btn subtle" type="button" data-remove="${i}" ${draft.questions.length === 1 ? 'disabled' : ''} aria-label="Remove question ${i + 1}">Remove</button></div>
     <label class="field" for="type-${i}">Question type</label><select class="input type-select" id="type-${i}" data-type="${i}">${Object.entries(questionTypes).map(([value, label]) => `<option value="${value}" ${value === type ? 'selected' : ''}>${label}</option>`).join('')}</select>
     <label class="field" for="question-${i}">Question heading</label><textarea class="input" id="question-${i}" data-question maxlength="500" required rows="2" placeholder="Type your question…">${escapeHTML(q.question)}</textarea>
-    <div class="image-editor">${q.image ? `<img class="editor-image" src="${escapeHTML(q.image)}" alt="${escapeHTML(q.imageAlt || 'Question image')}"><button class="btn subtle" type="button" data-remove-image="${i}">Remove picture</button>` : `<img class="default-image" src="${defaultPicture(q)}" alt="Colourful quiz illustration"><p class="small">Standard quiz picture · add your own to replace it.</p>`}<label class="field" for="image-${i}">${q.image ? 'Replace picture' : 'Upload picture'}</label><input class="input" id="image-${i}" type="file" accept="image/png,image/jpeg,image/webp,image/gif" data-image="${i}"><p class="small">PNG, JPEG, WebP or GIF · up to 50 MB.</p>${pictureUrlControls(`question-${i}`)}${q.image ? `<label class="field" for="alt-${i}">Picture description</label><input class="input" id="alt-${i}" data-image-alt maxlength="200" placeholder="Describe the picture for players using a screen reader" value="${escapeHTML(q.imageAlt)}">` : ''}</div>
+    <div class="image-editor">${q.image ? `<img class="editor-image" src="${escapeHTML(q.image)}" alt="${escapeHTML(q.imageAlt || 'Question image')}"><button class="btn subtle" type="button" data-remove-image="${i}">Remove picture</button>` : `<img class="default-image" src="${defaultPicture(q)}" alt="Colourful quiz illustration"><p class="small">Standard quiz picture · add your own to replace it.</p>`}<label class="field" for="image-${i}">${q.image ? 'Replace picture' : 'Upload picture'}</label><input class="input" id="image-${i}" type="file" accept="image/png,image/jpeg,image/webp,image/gif" data-image="${i}"><p class="small">PNG, JPEG, WebP or GIF · up to 50 MB.</p>${pictureUrlControls(`question-${i}`)}${q.image ? `<label class="field" for="alt-${i}">Picture description</label><input class="input" id="alt-${i}" data-image-alt maxlength="200" placeholder="Describe the picture for players using a screen reader" value="${escapeHTML(q.imageAlt)}">` : ''}<label class="reveal-picture-toggle"><input type="checkbox" data-reveal-image ${q.showRevealImage ? 'checked' : ''}> Show an extra picture after answers are revealed</label>${q.showRevealImage ? `<div class="reveal-picture-settings">${q.revealImage ? `<img class="editor-image" src="${escapeHTML(q.revealImage)}" alt="${escapeHTML(q.revealImageAlt || 'Answer explanation picture')}"><button class="btn subtle" type="button" data-remove-reveal-image="${i}">Remove extra picture</button>` : '<p class="small">Add an explanation picture below.</p>'}<label class="field" for="reveal-image-${i}">${q.revealImage ? 'Replace picture' : 'Upload picture'}</label><input class="input" id="reveal-image-${i}" type="file" accept="image/png,image/jpeg,image/webp,image/gif" data-image="reveal-${i}"><p class="small">PNG, JPEG, WebP or GIF · up to 50 MB.</p>${pictureUrlControls(`reveal-${i}`)}${q.revealImage ? `<label class="field" for="reveal-alt-${i}">Picture description</label><input class="input" id="reveal-alt-${i}" data-reveal-image-alt maxlength="200" placeholder="Describe how this picture explains the answer" value="${escapeHTML(q.revealImageAlt || '')}">` : ''}</div>` : ''}</div>
     ${answers}<div class="form-row"><label class="field" for="time-${i}" style="margin:0">Answer time</label><select class="input" id="time-${i}" data-time>${[...new Set([5,10,20,30,60,90,120,q.timeLimit])].sort((a,b) => a-b).map(t => `<option value="${t}" ${q.timeLimit === t ? 'selected' : ''}>${t} sec</option>`).join('')}</select><span class="small">Starts when the host opens answers.</span></div>
   </article>`;
 }
@@ -222,6 +225,8 @@ function editor() {
     editor(); scheduleDraftSave();
   });
   app.querySelectorAll('[data-remove-image]').forEach(button => button.onclick = () => { readDraft(); draft.questions[Number(button.dataset.removeImage)].image = ''; editor(); scheduleDraftSave(); });
+  app.querySelectorAll('[data-reveal-image]').forEach(input => input.onchange = () => { readDraft(); editor(); scheduleDraftSave(); });
+  app.querySelectorAll('[data-remove-reveal-image]').forEach(button => button.onclick = () => { readDraft(); draft.questions[Number(button.dataset.removeRevealImage)].revealImage = ''; editor(); scheduleDraftSave(); });
   app.querySelector('[data-remove-cover]')?.addEventListener('click', () => { readDraft(); draft.coverImage = ''; draft.coverImageAlt = ''; editor(); scheduleDraftSave(); });
   let uploading = false;
   const uploadPicture = async (file, target) => {
@@ -237,12 +242,13 @@ function editor() {
       const result = await response.json(); if (!response.ok) throw new Error(result.error);
       if (version === routeVersion) {
         if (target === 'cover') draft.coverImage = result.image;
+        else if (typeof target === 'string' && target.startsWith('reveal-')) draft.questions[Number(target.slice('reveal-'.length))].revealImage = result.image;
         else draft.questions[target].image = result.image;
       }
     } catch (error) { toast(error.message || 'This picture could not be read. Try a PNG or JPEG.'); }
     finally { uploading = false; if (version === routeVersion) { editor(); scheduleDraftSave(); } }
   };
-  app.querySelectorAll('[data-image]').forEach(input => input.onchange = () => uploadPicture(input.files[0], Number(input.dataset.image)));
+  app.querySelectorAll('[data-image]').forEach(input => input.onchange = () => uploadPicture(input.files[0], input.dataset.image.startsWith('reveal-') ? input.dataset.image : Number(input.dataset.image)));
   app.querySelector('[data-cover-image]').onchange = event => uploadPicture(event.target.files[0], 'cover');
   app.querySelectorAll('[data-load-picture]').forEach(button => button.onclick = () => run(button, async () => {
     const version = routeVersion, target = button.dataset.loadPicture;
@@ -250,7 +256,7 @@ function editor() {
     const url = app.querySelector(`[data-picture-url="${target}"]`).value.trim();
     if (!url) throw new Error('Paste an image URL first.');
     const result = await api('/images/from-url', {method:'POST', body:{url}});
-    if (version === routeVersion) openCropper(result.image, target === 'cover' ? 'cover' : Number(target.slice('question-'.length)), uploadPicture);
+    if (version === routeVersion) openCropper(result.image, target === 'cover' ? 'cover' : target.startsWith('reveal-') ? target : Number(target.slice('question-'.length)), uploadPicture);
   }));
   document.querySelector('#editor-form').onsubmit = event => { event.preventDefault(); run(event.submitter, async () => {
     clearTimeout(autosaveTimer);
@@ -276,13 +282,30 @@ async function connectRoom(role, pin, version) {
   stream.onerror = () => { const el=document.querySelector('.connection'); if(el) el.textContent='Reconnecting…'; };
   timer = setInterval(updateTimer,250);
 }
-function leaderboard(players) {
-  return `<div class="ranking">${players.slice(0,10).map((p,i)=>`<div class="rank-row"><span class="position">${i+1}</span><span class="player-emoji" aria-hidden="true">${escapeHTML(p.emoji || '😀')}</span><strong>${escapeHTML(p.nickname)}${p.id===roomState.self?.id?' (you)':''}</strong><span class="score">${p.score.toLocaleString()} <small>pts</small></span></div>`).join('')}</div>`;
+function leaderboard(players, {full=false, showCorrect=false}={}) {
+  const rows = full ? players : players.slice(0,10);
+  return `<div class="ranking${showCorrect?' final-ranking':''}">${rows.map((p,i)=>`<div class="rank-row"><span class="position">${p.rank || i+1}</span><span class="player-emoji" aria-hidden="true">${escapeHTML(p.emoji || '😀')}</span><strong>${escapeHTML(p.nickname)}${p.id===roomState.self?.id?' (you)':''}</strong>${showCorrect?`<span class="correct-count">${p.correctAnswers} correct</span>`:''}<span class="score">${p.score.toLocaleString()} <small>pts</small></span></div>`).join('')}</div>`;
+}
+function updateScoreboardReveal() {
+  const target = document.querySelector('#scoreboard-reveal');
+  if(!target || !roomState?.scoreboardVisible || !Number.isFinite(roomState.scoreboardShownAt))return;
+  const elapsed = Math.max(0,Date.now()-roomState.scoreboardShownAt), step = 2200;
+  const stage = elapsed < step*3 ? Math.floor(elapsed/step) : 3;
+  const key = `${roomState.scoreboardShownAt}:${stage}`;
+  if(target.dataset.stageKey===key)return;
+  target.dataset.stageKey=key;
+  if(stage===3) {
+    target.innerHTML=leaderboard(roomState.leaderboard,{full:true,showCorrect:true});
+    return;
+  }
+  const place = 3-stage, player = roomState.leaderboard[place-1];
+  target.innerHTML=`<div class="podium-reveal place-${place}">${place===1?'<div class="fireworks" aria-hidden="true"><i></i><i></i><i></i></div>':''}<p class="place-label">${place}${place===1?'st':place===2?'nd':'rd'} place</p>${player?`<div class="podium-player"><span aria-hidden="true">${escapeHTML(player.emoji||'😀')}</span><h2>${escapeHTML(player.nickname)}</h2><p>${player.correctAnswers} correct answers · ${player.score.toLocaleString()} points</p></div>`:'<h2>No player in this place</h2>'}</div>`;
 }
 function questionContent(s) {
   const q = s.question, host = s.host, preview = s.status === 'preview', reveal = s.status === 'reveal';
   const typed = q.type === 'type-answer', poll = q.type === 'poll';
   const image = `<figure class="question-picture"><img src="${escapeHTML(q.image || defaultPicture(q))}" alt="${escapeHTML(q.image ? q.imageAlt || 'Question picture' : 'Colourful quiz illustration')}"></figure>`;
+  const revealImage = reveal && q.revealImage ? `<figure class="question-picture explanation-picture"><figcaption>More context</figcaption><img src="${escapeHTML(q.revealImage)}" alt="${escapeHTML(q.revealImageAlt || 'Answer explanation picture')}"></figure>` : '';
   const heading = `<p class="eyebrow">${escapeHTML(questionTypes[q.type] || questionTypes.quiz)} · Question ${s.questionIndex + 1} of ${s.questionCount}</p><h1>${escapeHTML(q.question)}</h1>${image}`;
   if (preview) return `${heading}<div class="preview-note"><span class="badge">TAKE A LOOK</span>${s.previewEndsAt ? '<div class="preview-countdown"><span>Answers in</span><strong id="preview-countdown">5</strong></div>' : '<p>Read the question and study the picture. Answers will open when the host is ready.</p>'}</div>${host && !s.previewEndsAt ? '<button class="btn light" data-action="open">Open answers →</button>' : ''}`;
   let controls;
@@ -294,7 +317,7 @@ function questionContent(s) {
   const feedback = !host && reveal ? `<div class="feedback">${poll ? (s.self.answered ? 'Thanks for voting! No points in this round.' : 'Voting closed. No points in this round.') : s.self.correct ? `Correct! +${s.self.points} points` : s.self.answered ? 'Not this time. You’ve got the next one!' : 'Time’s up!'}</div>` : '';
   const showHeading = !s.answerOnly;
   const meta = s.answerOnly && !host ? '' : `<div class="question-meta"><div class="timer" aria-label="Seconds remaining" id="timer">${reveal ? '✓' : q.timeLimit}</div><div class="progress" aria-hidden="true"><div id="time-progress" style="width:${reveal ? 0 : 100}%"></div></div><span class="answer-count">${s.answeredCount} / ${s.players.length} ${poll ? 'voted' : 'answered'}</span></div>`;
-  return `${showHeading ? heading : ''}${meta}${controls}${feedback}${reveal && !poll ? leaderboard(s.leaderboard) : ''}${host ? `<div class="lobby-actions"><button class="btn light" data-action="next">${!reveal ? (poll ? 'Show votes' : 'Reveal answers') : s.questionIndex + 1 === s.questionCount ? 'Show podium 🏆' : 'Next question →'}</button><button class="btn ghost" data-action="end">End game</button></div>` : reveal ? '<p class="muted-white">Waiting for the host…</p>' : ''}`;
+  return `${showHeading ? heading : ''}${meta}${controls}${feedback}${revealImage}${reveal && !poll ? leaderboard(s.leaderboard) : ''}${host ? `<div class="lobby-actions"><button class="btn light" data-action="next">${!reveal ? (poll ? 'Show votes' : 'Reveal answers') : s.questionIndex + 1 === s.questionCount ? 'Show podium 🏆' : 'Next question →'}</button><button class="btn ghost" data-action="end">End game</button></div>` : reveal ? '<p class="muted-white">Waiting for the host…</p>' : ''}`;
 }
 function renderRoom() {
   const oldInput = document.querySelector('#typed-answer');
@@ -308,15 +331,16 @@ function renderRoom() {
   if (s.status==='countdown') {
     content = `<div class="start-countdown"><p class="eyebrow">Get ready to play</p><strong id="start-countdown">10</strong><p>The quiz is about to begin!</p></div>`;
   } else if (s.status==='lobby') {
-    content = host ? `<p class="eyebrow">Ready, set, quiz.</p><h1>Everyone in?</h1><p class="join-url">Join at <b>${escapeHTML(location.host)}</b> with game PIN</p><div class="pin-display"><small>GAME PIN</small><strong>${s.pin}</strong></div><div class="qr-invite"><img src="/api/rooms/${s.pin}/qr" alt="QR code to join game PIN ${s.pin}" width="240" height="240"><p>Scan to join</p></div><div><button class="btn ghost" id="copy-link">Copy invite link ↗</button></div><p class="room-title">${s.players.length} ${s.players.length===1?'player':'players'} in the lobby</p><div class="player-list">${s.players.length?s.players.map(p=>`<span class="player-chip"><span aria-hidden="true">${escapeHTML(p.emoji || '😀')}</span> ${escapeHTML(p.nickname)}</span>`).join(''):'<p class="empty">The stage is set. Just waiting for your people…</p>'}</div><div class="lobby-actions"><button class="btn light" data-action="start" ${s.players.length?'':'disabled'}>Start game →</button></div>` : `<div class="podium-icon" aria-hidden="true">✦</div><p class="eyebrow">You're on the list</p><h1>You're in, ${escapeHTML(s.self.emoji || '😀')} ${escapeHTML(s.self.nickname)}!</h1><p class="subtitle">Get ready. Your host will start the game soon.</p><span class="spinner"></span><p class="muted-white">${s.players.length} ${s.players.length===1?'player':'players'} ready to play</p>`;
+    content = host ? `<p class="eyebrow">Ready, set, quiz.</p><h1>Everyone in?</h1><p class="join-url">Join at <b>${escapeHTML(location.host)}</b> with game PIN</p><div class="pin-display"><small>GAME PIN</small><strong>${s.pin}</strong></div><div class="qr-invite"><img src="/api/rooms/${s.pin}/qr" alt="QR code to join game PIN ${s.pin}" width="240" height="240"><p>Scan to join</p></div><div><button class="btn ghost" id="copy-link">Copy invite link ↗</button></div><p class="scoring-note"><b>How points work:</b> A correct answer earns 500 base points plus up to 500 speed points. The speed bonus decreases steadily as time runs out, so an instant answer earns 1,000 and a correct answer at the deadline earns 500. Wrong or missed answers earn 0; polls are unscored.</p><p class="room-title">${s.players.length} ${s.players.length===1?'player':'players'} in the lobby</p><div class="player-list">${s.players.length?s.players.map(p=>`<span class="player-chip"><span aria-hidden="true">${escapeHTML(p.emoji || '😀')}</span> ${escapeHTML(p.nickname)}</span>`).join(''):'<p class="empty">The stage is set. Just waiting for your people…</p>'}</div><div class="lobby-actions"><button class="btn light" data-action="start" ${s.players.length?'':'disabled'}>Start game →</button></div>` : `<div class="podium-icon" aria-hidden="true">✦</div><p class="eyebrow">You're on the list</p><h1>You're in, ${escapeHTML(s.self.emoji || '😀')} ${escapeHTML(s.self.nickname)}!</h1><p class="subtitle">Get ready. Your host will start the game soon.</p><p class="scoring-note"><b>How points work:</b> A correct answer earns 500 base points plus up to 500 speed points. The speed bonus decreases steadily as time runs out, so an instant answer earns 1,000 and a correct answer at the deadline earns 500. Wrong or missed answers earn 0; polls are unscored.</p><span class="spinner"></span><p class="muted-white">${s.players.length} ${s.players.length===1?'player':'players'} ready to play</p>`;
   } else if (isQuestion || isReveal || s.status === 'preview') {
     content = questionContent(s);
   } else {
-    const board = s.scoreboardDeleted ? '<p class="muted-white">The scoreboard has been cleared.</p>' : s.scoreboardVisible ? leaderboard(s.leaderboard) : '<p class="muted-white">The final scoreboard is ready when you are.</p>';
+    const board = s.scoreboardDeleted ? '<p class="muted-white">The scoreboard has been cleared.</p>' : s.scoreboardVisible ? '<div id="scoreboard-reveal"></div>' : '<p class="muted-white">The final scoreboard is ready when you are.</p>';
     const scoreboardControls = host && s.hasScoredQuestions && !s.scoreboardDeleted ? `<div class="lobby-actions"><button class="btn light" data-action="show-scoreboard">${s.scoreboardVisible ? 'Hide scoreboard' : 'Show scoreboard'}</button><button class="btn ghost" data-action="clear-scoreboard">Delete scoreboard</button></div>` : '';
-    content = `<div class="podium-icon" aria-hidden="true">🏆</div><p class="eyebrow">That's a wrap</p><h1>${s.scoreboardVisible && s.leaderboard.length?`${escapeHTML(s.leaderboard[0].nickname)} takes the crown!`:'Thanks for playing!'}</h1><p class="subtitle">${escapeHTML(s.quizTitle)}${s.self?` · Your score: ${s.self.score.toLocaleString()} points`:''}</p>${s.hasScoredQuestions ? `${board}${scoreboardControls}` : '<p class="muted-white">All votes are in. Thanks for sharing your thoughts.</p>'}<a class="btn light" href="${host?'#host':'#'}">${host?'Host another quiz':'Play again'} →</a>`;
+    content = `<div class="podium-icon" aria-hidden="true">🏆</div><p class="eyebrow">That's a wrap</p><h1>Thanks for playing!</h1><p class="subtitle">${escapeHTML(s.quizTitle)}${s.self?` · Your score: ${s.self.score.toLocaleString()} points`:''}</p>${s.hasScoredQuestions ? `${board}${scoreboardControls}` : '<p class="muted-white">All votes are in. Thanks for sharing your thoughts.</p>'}<a class="btn light" href="${host?'#host':'#'}">${host?'Host another quiz':'Play again'} →</a>`;
   }
   app.innerHTML = `<section class="room">${bar}${content}</section>`;
+  updateScoreboardReveal();
   const typedInput = document.querySelector('#typed-answer');
   if (typedInput && inputDraft?.index === s.questionIndex) {
     typedInput.value = inputDraft.value;
@@ -348,6 +372,7 @@ function renderRoom() {
 }
 function updateTimer() {
   if(!roomState)return;
+  if(roomState.status==='finished') { updateScoreboardReveal(); return; }
   const updateCountdown = (element, deadline) => {
     if(!element)return;
     const next = String(Math.max(1, Math.ceil((deadline-Date.now())/1000)));

@@ -94,14 +94,18 @@ export function createApp({ dataDir = process.env.DATA_DIR || path.join(baseDir,
   const bearer = req => /^Bearer (.+)$/.exec(req.headers.authorization || '')?.[1] || req.headers['x-quiz-owner'];
   const owner = req => { const token = bearer(req); if (!token || token.length < 16 || token.length > 256) fail(401, 'A browser owner token is required.'); return ownerHash(token); };
   const publicQuiz = ({ owner: ignored, ...quiz }) => quiz;
-  const rank = room => [...room.players.values()].map(p => ({ id: p.id, nickname: p.nickname, emoji: p.emoji, score: p.score })).sort((a, b) => b.score - a.score || a.nickname.localeCompare(b.nickname)).map((p, i) => ({ ...p, rank: i + 1 }));
+  const rank = room => [...room.players.values()].map(p => ({ id: p.id, nickname: p.nickname, emoji: p.emoji, score: p.score, correctAnswers: p.correctAnswers })).sort((a, b) => b.score - a.score || a.nickname.localeCompare(b.nickname)).map((p, i) => ({ ...p, rank: i + 1 }));
   const identity = (room, token) => token && token === room.hostToken ? { host: true } : room.players.get(token);
   const state = (room, who) => {
     const question = room.quiz.questions[room.index];
-    const result = { pin: room.pin, status: room.status, quizTitle: room.quiz.title, hasScoredQuestions: room.quiz.questions.some(q => q.type !== 'poll'), questionIndex: room.index, questionCount: room.quiz.questions.length, players: rank(room), leaderboard: room.scoreboardDeleted ? [] : rank(room), answeredCount: [...room.players.values()].filter(p => p.answer !== undefined).length, answerOnly: room.answerOnly === true, scoreboardVisible: room.scoreboardVisible === true, scoreboardDeleted: room.scoreboardDeleted === true, host: !!who.host };
+    const result = { pin: room.pin, status: room.status, quizTitle: room.quiz.title, hasScoredQuestions: room.quiz.questions.some(q => q.type !== 'poll'), questionIndex: room.index, questionCount: room.quiz.questions.length, players: rank(room), leaderboard: room.scoreboardDeleted ? [] : rank(room), answeredCount: [...room.players.values()].filter(p => p.answer !== undefined).length, answerOnly: room.answerOnly === true, scoreboardVisible: room.scoreboardVisible === true, scoreboardDeleted: room.scoreboardDeleted === true, scoreboardShownAt: room.scoreboardVisible ? room.scoreboardShownAt : null, host: !!who.host };
     if (room.status === 'countdown') result.countdownEndsAt = room.countdownEndsAt;
     if (question && ['preview', 'question', 'reveal', 'finished'].includes(room.status)) {
       result.question = { type: question.type ?? 'quiz', question: question.question, image: question.image || '', imageAlt: question.imageAlt || '', timeLimit: question.timeLimit };
+      if ((room.status === 'reveal' || room.status === 'finished') && question.showRevealImage) {
+        result.question.revealImage = question.revealImage || '';
+        result.question.revealImageAlt = question.revealImageAlt || '';
+      }
       if (room.status !== 'preview') {
         result.question.answers = question.answers;
         result.question.startedAt = room.startedAt;
@@ -146,7 +150,7 @@ export function createApp({ dataDir = process.env.DATA_DIR || path.join(baseDir,
     room.previewEndsAt = undefined;
     room.answerOnly = false;
     room.index++;
-    if (room.index >= room.quiz.questions.length) { room.index = room.quiz.questions.length - 1; room.status = 'finished'; room.scoreboardVisible = false; room.scoreboardDeleted = false; broadcast(room); return; }
+    if (room.index >= room.quiz.questions.length) { room.index = room.quiz.questions.length - 1; room.status = 'finished'; room.scoreboardVisible = false; room.scoreboardShownAt = undefined; room.scoreboardDeleted = false; broadcast(room); return; }
     for (const p of room.players.values()) { p.answer = undefined; p.points = 0; p.correct = false; }
     showPreview(room, true);
   };
@@ -249,7 +253,7 @@ export function createApp({ dataDir = process.env.DATA_DIR || path.join(baseDir,
           if (typeof nickname !== 'string' || !nickname.trim() || nickname.trim().length > 24 || /[\u0000-\u001f\u007f]/.test(nickname)) fail(400, 'Choose a nickname of 1–24 characters.');
           if (!playerEmojis.includes(emoji)) fail(400, 'Choose one of the available player emojis.');
           if ([...room.players.values()].some(p => p.nickname.toLowerCase() === nickname.trim().toLowerCase())) fail(409, 'That nickname is already taken.');
-          const playerToken = secret(); room.players.set(playerToken, { id: randomUUID(), nickname: nickname.trim(), emoji, score: 0 }); room.touchedAt = Date.now(); broadcast(room); return send(res, 201, { playerToken });
+          const playerToken = secret(); room.players.set(playerToken, { id: randomUUID(), nickname: nickname.trim(), emoji, score: 0, correctAnswers: 0 }); room.touchedAt = Date.now(); broadcast(room); return send(res, 201, { playerToken });
         }
         const who = identity(room, bearer(req) || req.headers['x-quiz-host-token'] || url.searchParams.get('token')); if (!who) fail(401, 'A valid game token is required.');
         room.touchedAt = Date.now();
@@ -277,6 +281,7 @@ export function createApp({ dataDir = process.env.DATA_DIR || path.join(baseDir,
             who.answer = answerIndex; who.correct = q.type !== 'poll' && answerIndex === q.correctIndex;
           }
           who.points = who.correct ? Math.round(500 + 500 * Math.max(0, 1 - (Date.now() - room.startedAt) / (q.timeLimit * 1000))) : 0;
+          if (who.correct) who.correctAnswers++;
           if ([...room.players.values()].every(p => p.answer !== undefined)) reveal(room); else broadcast(room);
           return send(res, 200, { ok: true });
         }
@@ -292,14 +297,16 @@ export function createApp({ dataDir = process.env.DATA_DIR || path.join(baseDir,
           }
           if (action === 'show-scoreboard') {
             if (room.status !== 'finished' || !room.quiz.questions.some(q => q.type !== 'poll') || room.scoreboardDeleted) fail(409, 'The final scoreboard is not available.');
-            room.scoreboardVisible = !room.scoreboardVisible; broadcast(room);
+            room.scoreboardVisible = !room.scoreboardVisible;
+            room.scoreboardShownAt = room.scoreboardVisible ? Date.now() : undefined;
+            broadcast(room);
           }
           if (action === 'clear-scoreboard') {
             if (room.status !== 'finished') fail(409, 'The scoreboard can only be cleared after the game.');
             for (const player of room.players.values()) player.score = 0;
-            room.scoreboardDeleted = true; room.scoreboardVisible = false; broadcast(room);
+            room.scoreboardDeleted = true; room.scoreboardVisible = false; room.scoreboardShownAt = undefined; broadcast(room);
           }
-          if (action === 'end') { if (room.status === 'question') reveal(room); clearTimeout(room.timer); room.status = 'finished'; room.scoreboardVisible = false; room.scoreboardDeleted = false; broadcast(room); }
+          if (action === 'end') { if (room.status === 'question') reveal(room); clearTimeout(room.timer); room.status = 'finished'; room.scoreboardVisible = false; room.scoreboardShownAt = undefined; room.scoreboardDeleted = false; broadcast(room); }
           return send(res, 200, state(room, who));
         }
         fail(404, 'Endpoint not found.');
