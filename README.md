@@ -78,7 +78,7 @@ Uploaded pictures live in `/app/data/media` in the same persistent Docker volume
 
 ## Paste pictures and default artwork
 
-Copy an image, click **Paste picture here** on the desired question, and press **Ctrl+V** (or **⌘V** on Mac). Pasting while editing that question's heading or answer also attaches the image to that question; ordinary text paste works normally. Copy the image itself, not just its URL. Clipboard images use the same validation and persistent storage as file uploads, and the paste gesture works on local-network HTTP without requesting clipboard-read access.
+Copy an image, click **Paste picture here** on the desired question, and press **Ctrl+V** (or **⌘V** on Mac). The app listens for pasted image files anywhere inside that question, including the paste button, heading, and answers; ordinary text paste works normally. Copy the image itself, not just its URL. Clipboard images use the same validation and persistent storage as file uploads, and the paste gesture works on local-network HTTP without requesting clipboard-read access.
 
 Questions without an uploaded or pasted picture automatically show original colourful quiz-themed artwork. Each question type has its own illustration, shown in the editor, preview, answering, and results. Removing a custom picture restores the default. No external image service is needed.
 

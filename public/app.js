@@ -111,11 +111,31 @@ function editor() {
     finally { uploading = false; if (version === routeVersion) editor(); }
   };
   app.querySelectorAll('[data-image]').forEach(input => input.onchange = () => uploadPicture(input.files[0], Number(input.dataset.image)));
-  app.querySelectorAll('.question-editor').forEach((question, index) => question.addEventListener('paste', event => {
-    const image = [...(event.clipboardData?.items || [])].find(item => item.kind === 'file' && item.type.startsWith('image/'));
-    if (!image) return; // Keep ordinary text paste intact in headings and answers.
-    event.preventDefault(); uploadPicture(image.getAsFile(), index);
-  }));
+  // Listen in capture phase at the document: browser clipboard events are not
+  // consistently targeted at buttons and other non-editable descendants.
+  document.addEventListener('paste', event => {
+    const question = event.target.closest?.('.question-editor');
+    if (!question) return;
+    const files = [...(event.clipboardData?.files || [])];
+    const items = [...(event.clipboardData?.items || [])];
+    const itemFiles = items.filter(item => item.kind === 'file').map(item => {
+      try { return item.getAsFile(); } catch { return null; }
+    }).filter(Boolean);
+    const file = [...files, ...itemFiles].find(candidate => {
+      const mime = candidate.type.toLowerCase();
+      return ['image/png','image/jpeg','image/webp','image/gif','image/x-png'].includes(mime)
+        || /\.(png|jpe?g|webp|gif)$/i.test(candidate.name || '');
+    });
+    if (!file) {
+      if (event.target.closest?.('.paste-target')) {
+        event.preventDefault();
+        toast('No picture found in the clipboard. Copy the image itself, then click here and press Ctrl+V or ⌘V.');
+      }
+      return; // Ordinary text paste in headings and answers remains unchanged.
+    }
+    event.preventDefault();
+    uploadPicture(file, [...app.querySelectorAll('.question-editor')].indexOf(question));
+  }, true);
   document.querySelector('#editor-form').onsubmit = event => { event.preventDefault(); run(event.submitter, async () => {
     readDraft(); const version = routeVersion;
     await api(draft.id ? `/quizzes/${draft.id}` : '/quizzes', {method:draft.id ? 'PUT' : 'POST', body:draft});
