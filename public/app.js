@@ -421,6 +421,7 @@ function updateTimer() {
 async function route() {
   const version=++routeVersion;stream?.close();stream=null;clearInterval(timer);roomState=null;
   const [page,arg,pin]=location.hash.slice(1).split('/');
+  document.body.classList.toggle('playing-game', page === 'room');
   setGithubActive(page !== 'room');
   if ((['host','create','edit'].includes(page) || (page === 'room' && arg === 'host')) && location.pathname !== '/host') { location.replace(`/host${location.hash}`); return; }
   try {
