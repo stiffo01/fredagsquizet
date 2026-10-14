@@ -11,7 +11,10 @@ const questionTypes = {'quiz':'Multiple choice', 'true-false':'True or false', '
 const newQuestion = () => ({type:'quiz', question:'', image:'', imageAlt:'', answers:['','','',''], correctIndex:0, timeLimit:20});
 function toast(message) { const el = document.querySelector('#toast'); el.textContent = message; el.hidden = false; clearTimeout(toast.timeout); toast.timeout = setTimeout(() => el.hidden = true, 6000); }
 async function api(path, {method='GET', body, token=ownerToken} = {}) {
-  const response = await fetch(`/api${path}`, {method, headers:{'Content-Type':'application/json', ...(token ? {Authorization:`Bearer ${token}`} : {})}, ...(body ? {body:JSON.stringify(body)} : {})});
+  const authHeaders = token === ownerToken ? {'X-Quiz-Owner':token}
+    : session?.role === 'host' && token === session.token ? {'X-Quiz-Host-Token':token}
+    : token ? {Authorization:`Bearer ${token}`} : {};
+  const response = await fetch(`/api${path}`, {method, headers:{'Content-Type':'application/json', ...authHeaders}, ...(body ? {body:JSON.stringify(body)} : {})});
   const data = await response.json();
   if (!response.ok) throw new Error(data.error || 'Something went wrong. Please try again.');
   return data;
@@ -23,7 +26,7 @@ async function run(button, action) {
   finally { if (button?.isConnected) button.disabled = false; }
 }
 function joinPage(pin='') {
-  app.innerHTML = `<section class="join"><p class="eyebrow">Big questions. Good company.</p><h1 class="hero-logo">Fredags<span>quizet</span></h1><p class="subtitle">Gather your people.<br>Let the game begin.</p><form class="card" id="join-form"><label class="field" for="pin">Got a game PIN?</label><input class="input pin-input" id="pin" name="pin" inputmode="numeric" autocomplete="off" pattern="[0-9]{6}" maxlength="6" placeholder="Game PIN" value="${escapeHTML(pin)}" required aria-label="Six-digit game PIN"><button class="btn wide" type="submit">Enter <span aria-hidden="true">→</span></button></form><p class="join-note">Bringing everyone together? <a href="#host">Host a quiz</a></p><div class="shape-row" aria-hidden="true"><span>▲</span><span>◆</span><span>●</span><span>■</span></div><p class="small muted-white">One screen to host. Any device to play.</p></section>`;
+  app.innerHTML = `<section class="join"><p class="eyebrow">Big questions. Good company.</p><h1 class="hero-logo">Fredags<span>quizet</span></h1><p class="subtitle">Gather your people.<br>Let the game begin.</p><form class="card" id="join-form"><label class="field" for="pin">Got a game PIN?</label><input class="input pin-input" id="pin" name="pin" inputmode="numeric" autocomplete="off" pattern="[0-9]{6}" maxlength="6" placeholder="Game PIN" value="${escapeHTML(pin)}" required aria-label="Six-digit game PIN"><button class="btn wide" type="submit">Enter <span aria-hidden="true">→</span></button></form><p class="join-note">Bringing everyone together? <a href="/host#host">Host a quiz</a></p><div class="shape-row" aria-hidden="true"><span>▲</span><span>◆</span><span>●</span><span>■</span></div><p class="small muted-white">One screen to host. Any device to play.</p></section>`;
   document.querySelector('#join-form').onsubmit = event => {
     event.preventDefault(); const pin = document.querySelector('#pin').value.trim();
     nicknamePage(pin);
@@ -46,7 +49,7 @@ async function library(version) {
     const result = await api('/rooms', {method:'POST', body:{quizId:button.dataset.host}});
     saveSession({pin:result.pin, token:result.hostToken, role:'host'});
   }));
-  app.querySelectorAll('[data-edit]').forEach(button => button.onclick = () => { location.hash = `edit/${button.dataset.edit}`; });
+  app.querySelectorAll('[data-edit]').forEach(button => button.onclick = () => { location.href = `/host#edit/${button.dataset.edit}`; });
   app.querySelectorAll('[data-delete]').forEach(button => button.onclick = () => run(button, async () => {
     if (!confirm('Delete this quiz from your library?')) return;
     await api(`/quizzes/${button.dataset.delete}`, {method:'DELETE'}); await library(routeVersion);
@@ -78,12 +81,12 @@ function editorQuestion(q, i) {
     <div class="question-heading"><h2>Question ${i + 1}</h2><button class="btn subtle" type="button" data-remove="${i}" ${draft.questions.length === 1 ? 'disabled' : ''} aria-label="Remove question ${i + 1}">Remove</button></div>
     <label class="field" for="type-${i}">Question type</label><select class="input type-select" id="type-${i}" data-type="${i}">${Object.entries(questionTypes).map(([value, label]) => `<option value="${value}" ${value === type ? 'selected' : ''}>${label}</option>`).join('')}</select>
     <label class="field" for="question-${i}">Question heading</label><textarea class="input" id="question-${i}" data-question maxlength="500" required rows="2" placeholder="Type your question…">${escapeHTML(q.question)}</textarea>
-    <div class="image-editor">${q.image ? `<img class="editor-image" src="${escapeHTML(q.image)}" alt="${escapeHTML(q.imageAlt || 'Question image')}"><button class="btn subtle" type="button" data-remove-image="${i}">Remove picture</button>` : `<img class="default-image" src="${defaultPicture(q)}" alt="Colourful quiz illustration"><p class="small">Standard quiz picture · add your own to replace it.</p>`}<button class="btn subtle paste-target" type="button">Paste picture here · Ctrl+V / ⌘V</button><label class="field" for="image-${i}">${q.image ? 'Replace picture' : 'Upload picture'}</label><input class="input" id="image-${i}" type="file" accept="image/png,image/jpeg,image/webp,image/gif" data-image="${i}"><p class="small">Copy an image, click the paste area and press Ctrl+V (⌘V on Mac), or choose a file. PNG, JPEG, WebP or GIF · up to 5 MB.</p>${q.image ? `<label class="field" for="alt-${i}">Picture description</label><input class="input" id="alt-${i}" data-image-alt maxlength="200" placeholder="Describe the picture for players using a screen reader" value="${escapeHTML(q.imageAlt)}">` : ''}</div>
+    <div class="image-editor">${q.image ? `<img class="editor-image" src="${escapeHTML(q.image)}" alt="${escapeHTML(q.imageAlt || 'Question image')}"><button class="btn subtle" type="button" data-remove-image="${i}">Remove picture</button>` : `<img class="default-image" src="${defaultPicture(q)}" alt="Colourful quiz illustration"><p class="small">Standard quiz picture · add your own to replace it.</p>`}<button class="btn subtle paste-target" type="button">Paste picture here · Ctrl+V / ⌘V</button><label class="field" for="image-${i}">${q.image ? 'Replace picture' : 'Upload picture'}</label><input class="input" id="image-${i}" type="file" accept="image/png,image/jpeg,image/webp,image/gif" data-image="${i}"><p class="small">Copy an image, click the paste area and press Ctrl+V (⌘V on Mac), or choose a file. PNG, JPEG, WebP or GIF · up to 50 MB.</p>${q.image ? `<label class="field" for="alt-${i}">Picture description</label><input class="input" id="alt-${i}" data-image-alt maxlength="200" placeholder="Describe the picture for players using a screen reader" value="${escapeHTML(q.imageAlt)}">` : ''}</div>
     ${answers}<div class="form-row"><label class="field" for="time-${i}" style="margin:0">Answer time</label><select class="input" id="time-${i}" data-time>${[...new Set([5,10,20,30,60,90,120,q.timeLimit])].sort((a,b) => a-b).map(t => `<option value="${t}" ${q.timeLimit === t ? 'selected' : ''}>${t} sec</option>`).join('')}</select><span class="small">Starts when the host opens answers.</span></div>
   </article>`;
 }
 function editor() {
-  app.innerHTML = `<section class="shell editor"><div class="topline"><div><p class="eyebrow">Make it your own</p><h1>${draft.id ? 'Edit your quiz' : 'A great game starts here.'}</h1><p>Mix question types, add pictures, and set the pace.</p></div><a class="btn ghost" href="#host">Back to library</a></div><form id="editor-form"><label class="field" for="quiz-title">Quiz title</label><input class="input editor-title" id="quiz-title" placeholder="Give your quiz a name" maxlength="120" required value="${escapeHTML(draft.title)}">${draft.questions.map(editorQuestion).join('')}<div class="savebar"><button class="btn ghost" id="add-question" type="button" ${draft.questions.length >= 50 ? 'disabled' : ''}>＋ Add question</button><button class="btn light" type="submit">Save quiz ✓</button></div></form></section>`;
+  app.innerHTML = `<section class="shell editor"><div class="topline"><div><p class="eyebrow">Make it your own</p><h1>${draft.id ? 'Edit your quiz' : 'A great game starts here.'}</h1><p>Mix question types, add pictures, and set the pace.</p></div><a class="btn ghost" href="/host#host">Back to library</a></div><form id="editor-form"><label class="field" for="quiz-title">Quiz title</label><input class="input editor-title" id="quiz-title" placeholder="Give your quiz a name" maxlength="120" required value="${escapeHTML(draft.title)}">${draft.questions.map(editorQuestion).join('')}<div class="savebar"><button class="btn ghost" id="add-question" type="button" ${draft.questions.length >= 50 ? 'disabled' : ''}>＋ Add question</button><button class="btn light" type="submit">Save quiz ✓</button></div></form></section>`;
   document.querySelector('#add-question').onclick = () => { readDraft(); draft.questions.push(newQuestion()); editor(); app.querySelectorAll('.question-editor')[draft.questions.length - 1].scrollIntoView({block:'center',behavior:'smooth'}); };
   app.querySelectorAll('[data-remove]').forEach(button => button.onclick = () => { readDraft(); draft.questions.splice(Number(button.dataset.remove), 1); editor(); });
   app.querySelectorAll('[data-type]').forEach(select => select.onchange = () => {
@@ -101,10 +104,10 @@ function editor() {
     const version = routeVersion; readDraft(); const q = draft.questions[index];
     app.querySelectorAll('#editor-form input, #editor-form textarea, #editor-form select, #editor-form button').forEach(el => el.disabled = true);
     try {
-      if (file.size > 5 * 1024 * 1024) throw new Error('Choose an image no larger than 5 MB.');
+      if (file.size > 50 * 1024 * 1024) throw new Error('Choose an image no larger than 50 MB.');
       const bitmap = await createImageBitmap(file); const pixels = bitmap.width * bitmap.height; bitmap.close();
       if (pixels > 30000000) throw new Error('Choose an image smaller than 30 megapixels.');
-      const response = await fetch('/api/images', {method:'POST', headers:{Authorization:`Bearer ${ownerToken}`, 'Content-Type':file.type || 'application/octet-stream'}, body:file});
+      const response = await fetch('/api/images', {method:'POST', headers:{'X-Quiz-Owner':ownerToken, 'Content-Type':file.type || 'application/octet-stream'}, body:file});
       const result = await response.json(); if (!response.ok) throw new Error(result.error);
       if (version === routeVersion) q.image = result.image;
     } catch (error) { toast(error.message || 'This picture could not be read. Try a PNG or JPEG.'); }
@@ -139,13 +142,13 @@ function editor() {
   document.querySelector('#editor-form').onsubmit = event => { event.preventDefault(); run(event.submitter, async () => {
     readDraft(); const version = routeVersion;
     await api(draft.id ? `/quizzes/${draft.id}` : '/quizzes', {method:draft.id ? 'PUT' : 'POST', body:draft});
-    if (version !== routeVersion) return; draft = null; location.hash = 'host';
+    if (version !== routeVersion) return; draft = null; location.href = '/host#host';
   }); };
 }
 function saveSession(value) { session = value; sessionStorage.setItem(`quizpop-${value.role}-${value.pin}`,JSON.stringify(value)); location.hash=`room/${value.role}/${value.pin}`; }
 async function connectRoom(role, pin, version) {
   const stored = sessionStorage.getItem(`quizpop-${role}-${pin}`);
-  if (!stored) { location.hash = role==='host'?'host':`join/${pin}`; return; }
+  if (!stored) { location.href = role==='host'?'/host#host':`/#join/${pin}`; return; }
   session = JSON.parse(stored);
   roomState = await api(`/rooms/${pin}/state`,{token:session.token});
   if (version !== routeVersion) return;
@@ -203,7 +206,7 @@ function renderRoom() {
     event.preventDefault(); const answerText = typedInput.value;
     run(event.submitter, () => submitAnswer({answerText}));
   });
-  document.querySelector('#leave-room').onclick=()=>{ if(confirm(host?'Leave this screen? The game stays available; return with your browser Back button.':'Leave this game? You can return with your browser Back button.')) location.hash=host?'host':''; };
+  document.querySelector('#leave-room').onclick=()=>{ if(confirm(host?'Leave this screen? The game stays available; return with your browser Back button.':'Leave this game? You can return with your browser Back button.')) location.href=host?'/host#host':'/'; };
   document.querySelector('#copy-link')?.addEventListener('click', () => run(document.querySelector('#copy-link'),async()=>{
     if(navigator.clipboard?.writeText){ await navigator.clipboard.writeText(url); document.querySelector('#copy-link').textContent='Link copied ✓'; }
     else prompt('Copy this invite link:',url);
@@ -227,6 +230,7 @@ function updateTimer() {
 async function route() {
   const version=++routeVersion;stream?.close();stream=null;clearInterval(timer);roomState=null;
   const [page,arg,pin]=location.hash.slice(1).split('/');
+  if ((['host','create','edit'].includes(page) || (page === 'room' && arg === 'host')) && location.pathname !== '/host') { location.replace(`/host${location.hash}`); return; }
   try {
     if(page==='host')await library(version);
     else if(page==='create'){draft={title:'',questions:[newQuestion()]};editor();}
@@ -235,7 +239,7 @@ async function route() {
       if(draft.id==='sample'){delete draft.id;draft.title+=' (copy)';}editor();
     }else if(page==='room')await connectRoom(arg,pin,version);
     else joinPage(page==='join'&&/^\d{6}$/.test(arg)?arg:'');
-  } catch(error){if(version!==routeVersion)return;app.innerHTML=`<section class="join"><div class="card"><h1>Couldn't open that.</h1><p>${escapeHTML(error.message)}</p><a class="btn wide" href="#">Back to join</a><a class="btn subtle wide" href="#host">Quiz library</a></div></section>`;}
+  } catch(error){if(version!==routeVersion)return;app.innerHTML=`<section class="join"><div class="card"><h1>Couldn't open that.</h1><p>${escapeHTML(error.message)}</p><a class="btn wide" href="#">Back to join</a><a class="btn subtle wide" href="/host#host">Quiz library</a></div></section>`;}
 }
 window.addEventListener('hashchange',route);
 route();

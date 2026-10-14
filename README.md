@@ -4,16 +4,22 @@ A self-hosted multiplayer quiz game inspired by the Kahoot PIN-and-nickname expe
 
 ## Run with Docker Compose
 
-Requires Docker with the Compose plugin.
+Requires Docker with the Compose plugin. Configure a unique username and password in a local `.env` file before starting:
 
 ```sh
+cp .env.example .env
+# Edit .env and set a long, unique HOST_PASSWORD
 docker compose up --build -d
 docker compose ps
 ```
 
+Open `/host` on the server to reach the quiz library and editor; the browser will request the Basic Auth credentials. The root URL remains public for players to enter a PIN and compete. Quiz management APIs, image uploads, room creation, and host controls require those same credentials. Joining, answering, and viewing player results remain public.
+
+The browser's Basic Auth prompt is convenient on a trusted LAN. HTTP does not encrypt Basic Auth credentials, so place the service behind HTTPS before using it on an untrusted network or the Internet.
+
 Open **http://localhost:8095** on the server machine. For a shared game, the host and players should open **http://SERVER_LAN_IP:8095** on the same network; allow inbound TCP port 8095 through the server firewall if necessary. A phone's `localhost` refers to that phone, so use the server's LAN address on other devices.
 
-1. Open the host area and choose the included quiz or create a quiz.
+1. Open the host area at `/host` and sign in with the configured Basic Auth credentials. Choose the included quiz or create a quiz.
 2. Host the quiz and share its six-digit PIN.
 3. Players open the same site, enter the PIN, and choose a nickname.
 4. Start after players join, then advance through the results and questions.
@@ -46,12 +52,11 @@ Active rooms, player sessions, and game scores live in server memory and reset w
 Requires Node.js 24 or later. No dependency installation is needed.
 
 ```sh
-npm test
-npm run test:browser # optional; requires system Chromium (or CHROMIUM=/path/to/browser)
-npm start
+HOST_USERNAME=fredagsquizet HOST_PASSWORD=choose-a-long-password npm test
+HOST_USERNAME=fredagsquizet HOST_PASSWORD=choose-a-long-password npm start
 ```
 
-Open http://localhost:3000. Set `PORT` to change the listening port and `DATA_DIR` to change the default `./data` storage directory. Health status is available at `GET /api/health`.
+Open http://localhost:3000 for players or http://localhost:3000/host for the protected host area. Set `PORT` to change the listening port and `DATA_DIR` to change the default `./data` storage directory. Health status is available at `GET /api/health`.
 
 ## Research and scope
 
@@ -68,7 +73,7 @@ In **Create quiz** or **Edit**, choose a question type for each question:
 - **Type an answer:** enter up to 10 accepted answers, one per line. Players type their response. Matching ignores capitalization and extra whitespace, with Unicode normalization; punctuation still matters.
 - **Poll:** players vote on one choice. Results show vote counts; this round awards no points and has no leaderboard. A quiz containing only polls has no final winner.
 
-Use **Upload picture** under the question heading to add a PNG, JPEG, WebP, or GIF (maximum 5 MB; the editor accepts up to 30 megapixels). Add a description for accessibility. Pictures can be replaced or removed in the editor and remain visible during answering and results.
+Use **Upload picture** under the question heading to add a PNG, JPEG, WebP, or GIF (maximum 50 MB; the editor accepts up to 30 megapixels). Add a description for accessibility. Pictures can be replaced or removed in the editor and remain visible during answering and results.
 
 Every question starts in **preview** on both host and player screens, displaying only the heading and optional picture. The host clicks **Open answers** to show the choices or typed-answer field and start the full answer timer. Preview has no timer; it survives refreshing the host screen. Correct answers and accepted typed responses stay hidden until the reveal.
 
@@ -83,3 +88,5 @@ Copy an image, click **Paste picture here** on the desired question, and press *
 Questions without an uploaded or pasted picture automatically show original colourful quiz-themed artwork. Each question type has its own illustration, shown in the editor, preview, answering, and results. Removing a custom picture restores the default. No external image service is needed.
 
 The application and Compose service are named **Fredagsquizet** (`fredagsquizet` in Compose). Existing browser ownership/session keys and the `quiz-data` volume remain unchanged so the rename preserves saved quizzes.
+
+Basic Auth settings are read from `HOST_USERNAME` and `HOST_PASSWORD`. Change them in `.env` and recreate the container to rotate credentials. The local `.env` file is ignored by Git; keep it private.

@@ -1,5 +1,5 @@
 import http from 'node:http';
-import { randomBytes, randomInt, randomUUID, createHash } from 'node:crypto';
+import { randomBytes, randomInt, randomUUID, createHash, timingSafeEqual } from 'node:crypto';
 import { mkdirSync, readFileSync, writeFileSync, renameSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
@@ -11,7 +11,22 @@ const secret = () => randomBytes(24).toString('base64url');
 const fail = (status, message) => { throw Object.assign(new Error(message), { status }); };
 const ownerHash = token => createHash('sha256').update(token).digest('hex');
 
-export function createApp({ dataDir = process.env.DATA_DIR || path.join(baseDir, 'data'), publicDir = path.join(baseDir, 'public'), roomTtlMs = 6 * 60 * 60 * 1000 } = {}) {
+export function createApp({ dataDir = process.env.DATA_DIR || path.join(baseDir, 'data'), publicDir = path.join(baseDir, 'public'), roomTtlMs = 6 * 60 * 60 * 1000, hostUsername = process.env.HOST_USERNAME, hostPassword = process.env.HOST_PASSWORD } = {}) {
+  if (!hostUsername || !hostPassword) throw new Error('Set HOST_USERNAME and HOST_PASSWORD before starting Fredagsquizet.');
+  const equalSecret = (provided, expected) => timingSafeEqual(createHash('sha256').update(provided).digest(), createHash('sha256').update(expected).digest());
+  const authorizeHost = req => {
+    const header = req.headers.authorization || '';
+    const encoded = /^Basic ([A-Za-z0-9+/]+={0,2})$/.exec(header)?.[1];
+    let username = '', password = '';
+    if (encoded) {
+      const credentials = Buffer.from(encoded, 'base64').toString('utf8');
+      const colon = credentials.indexOf(':');
+      if (colon >= 0) { username = credentials.slice(0, colon); password = credentials.slice(colon + 1); }
+    }
+    if (!encoded || !equalSecret(username, hostUsername) || !equalSecret(password, hostPassword)) {
+      throw Object.assign(new Error('Sign in to access quiz hosting.'), {status:401, basicAuth:true});
+    }
+  };
   mkdirSync(dataDir, { recursive: true });
   const mediaDir = path.join(dataDir, 'media');
   mkdirSync(mediaDir, { recursive: true });
@@ -21,7 +36,7 @@ export function createApp({ dataDir = process.env.DATA_DIR || path.join(baseDir,
   catch (error) { if (error.code !== 'ENOENT') throw error; }
   const rooms = new Map();
   const persist = next => { writeFileSync(`${storePath}.tmp`, JSON.stringify(next, null, 2), { mode: 0o600 }); renameSync(`${storePath}.tmp`, storePath); saved = next; };
-  const bearer = req => /^Bearer (.+)$/.exec(req.headers.authorization || '')?.[1];
+  const bearer = req => /^Bearer (.+)$/.exec(req.headers.authorization || '')?.[1] || req.headers['x-quiz-owner'];
   const owner = req => { const token = bearer(req); if (!token || token.length < 16 || token.length > 256) fail(401, 'A browser owner token is required.'); return ownerHash(token); };
   const publicQuiz = ({ owner: ignored, ...quiz }) => quiz;
   const rank = room => [...room.players.values()].map(p => ({ id: p.id, nickname: p.nickname, score: p.score })).sort((a, b) => b.score - a.score || a.nickname.localeCompare(b.nickname)).map((p, i) => ({ ...p, rank: i + 1 }));
@@ -75,11 +90,12 @@ export function createApp({ dataDir = process.env.DATA_DIR || path.join(baseDir,
       const parts = url.pathname.split('/').filter(Boolean);
       if (req.method === 'GET' && url.pathname === '/api/health') return send(res, 200, { ok: true });
       if (req.method === 'POST' && url.pathname === '/api/images') {
+        authorizeHost(req);
         owner(req);
         const chunks = []; let bytes = 0;
         for await (const chunk of req) {
           bytes += chunk.length;
-          if (bytes > 5 * 1024 * 1024) fail(413, 'Images must be 5 MB or smaller.');
+          if (bytes > 50 * 1024 * 1024) fail(413, 'Images must be 50 MB or smaller.');
           chunks.push(chunk);
         }
         const image = Buffer.concat(chunks);
@@ -101,6 +117,7 @@ export function createApp({ dataDir = process.env.DATA_DIR || path.join(baseDir,
         return res.end(req.method === 'HEAD' ? undefined : image);
       }
       if (parts[0] === 'api' && parts[1] === 'quizzes') {
+        authorizeHost(req);
         const id = parts[2];
         if (req.method === 'GET') {
           const hash = bearer(req) ? owner(req) : null;
@@ -117,6 +134,7 @@ export function createApp({ dataDir = process.env.DATA_DIR || path.join(baseDir,
       }
       if (parts[0] === 'api' && parts[1] === 'rooms') {
         if (req.method === 'POST' && parts.length === 2) {
+          authorizeHost(req);
           if (rooms.size >= 1000) fail(503, 'Room limit reached. Try again later.');
           const input = await body(req);
           let quiz;
@@ -140,7 +158,7 @@ export function createApp({ dataDir = process.env.DATA_DIR || path.join(baseDir,
           if ([...room.players.values()].some(p => p.nickname.toLowerCase() === nickname.trim().toLowerCase())) fail(409, 'That nickname is already taken.');
           const playerToken = secret(); room.players.set(playerToken, { id: randomUUID(), nickname: nickname.trim(), score: 0 }); room.touchedAt = Date.now(); broadcast(room); return send(res, 201, { playerToken });
         }
-        const who = identity(room, bearer(req) || url.searchParams.get('token')); if (!who) fail(401, 'A valid game token is required.');
+        const who = identity(room, bearer(req) || req.headers['x-quiz-host-token'] || url.searchParams.get('token')); if (!who) fail(401, 'A valid game token is required.');
         room.touchedAt = Date.now();
         if (room.status === 'question' && Date.now() >= room.deadline) reveal(room);
         if (req.method === 'GET' && action === 'state') return send(res, 200, state(room, who));
@@ -170,6 +188,7 @@ export function createApp({ dataDir = process.env.DATA_DIR || path.join(baseDir,
           return send(res, 200, { ok: true });
         }
         if (req.method === 'POST' && ['start', 'open', 'next', 'end'].includes(action)) {
+          authorizeHost(req);
           if (!who.host) fail(403, 'Only the host can control the game.');
           if (action === 'start') { if (room.status !== 'lobby') fail(409, 'Game already started.'); if (!room.players.size) fail(409, 'Wait for at least one player.'); advance(room); }
           if (action === 'open') { if (room.status !== 'preview') fail(409, 'The question is not in preview.'); openAnswers(room); }
@@ -181,13 +200,14 @@ export function createApp({ dataDir = process.env.DATA_DIR || path.join(baseDir,
       }
       if (url.pathname.startsWith('/api/')) fail(404, 'Endpoint not found.');
       if (req.method !== 'GET' && req.method !== 'HEAD') fail(405, 'Method not allowed.');
-      const relative = decodeURIComponent(url.pathname).replace(/^\/+/, '') || 'index.html';
+      if (url.pathname === '/host') { authorizeHost(req); res.setHeader('X-Robots-Tag', 'noindex'); }
+      const relative = url.pathname === '/host' ? 'index.html' : decodeURIComponent(url.pathname).replace(/^\/+/, '') || 'index.html';
       const target = path.resolve(publicDir, relative);
       if (!target.startsWith(path.resolve(publicDir) + path.sep)) fail(403, 'Forbidden.');
       const types = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.svg': 'image/svg+xml', '.png': 'image/png', '.ico': 'image/x-icon', '.webp': 'image/webp' };
       let content; try { content = await readFile(target); } catch { fail(404, 'File not found.'); }
       res.writeHead(200, { 'Content-Type': types[path.extname(target)] || 'application/octet-stream', 'Cache-Control': 'no-cache' }); res.end(req.method === 'HEAD' ? undefined : content);
-    } catch (error) { if (!res.headersSent) send(res, error.status || 500, { error: error.status ? error.message : 'Internal server error.' }); else res.end(); if (!error.status) console.error(error); }
+    } catch (error) { if (!res.headersSent && error.basicAuth) res.setHeader('WWW-Authenticate', 'Basic realm="Fredagsquizet host", charset="UTF-8"'); if (!res.headersSent) send(res, error.status || 500, { error: error.status ? error.message : 'Internal server error.' }); else res.end(); if (!error.status) console.error(error); }
   });
   const sweep = setInterval(() => { for (const [pin, room] of rooms) if (Date.now() - room.touchedAt > roomTtlMs) { clearTimeout(room.timer); for (const c of room.clients) c.res.end(); rooms.delete(pin); } }, Math.min(roomTtlMs, 60000)); sweep.unref();
   const close = async () => { clearInterval(sweep); for (const room of rooms.values()) { clearTimeout(room.timer); for (const c of room.clients) c.res.end(); } server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); };
