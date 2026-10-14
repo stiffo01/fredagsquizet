@@ -29,3 +29,9 @@ services:
 
 volumes:
   quiz-data:
+
+networks:
+  default:
+    ipam:
+      config:
+        - subnet: 10.220.2.0/23
