@@ -3,7 +3,7 @@ services:
     container_name: fredagsquizet
     build: .
     ports:
-      - "${QUIZ_BIND:-0.0.0.0}:${QUIZ_PORT:-8095}:3000"
+      - "${QUIZ_BIND:-0.0.0.0}:${QUIZ_PORT:-8093}:3000"
     environment:
       PORT: "3000"
       DATA_DIR: /app/data

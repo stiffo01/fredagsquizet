@@ -17,7 +17,7 @@ Open `/host` on the server to reach the quiz library and editor; the browser wil
 
 The browser's Basic Auth prompt is convenient on a trusted LAN. HTTP does not encrypt Basic Auth credentials, so place the service behind HTTPS before using it on an untrusted network or the Internet.
 
-Open **http://localhost:8095** on the server machine. For a shared game, the host and players should open **http://SERVER_LAN_IP:8095** on the same network; allow inbound TCP port 8095 through the server firewall if necessary. A phone's `localhost` refers to that phone, so use the server's LAN address on other devices.
+Open **http://localhost:8093** on the server machine. For a shared game, the host and players should open **http://SERVER_LAN_IP:8093** on the same network; allow inbound TCP port 8093 through the server firewall if necessary. A phone's `localhost` refers to that phone, so use the server's LAN address on other devices.
 
 1. Open the host area at `/host` and sign in with the configured Basic Auth credentials. Host the shared Feature test quiz to try the game, or create a quiz.
 2. Host the quiz and share its six-digit PIN.
