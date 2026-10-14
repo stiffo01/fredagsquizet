@@ -139,22 +139,37 @@ function pictureUrlControls(target) {
 function openCropper(source, target, uploadPicture) {
   const modal = document.createElement('section');
   modal.className = 'crop-modal';
-  modal.innerHTML = `<div class="crop-card"><h2>Crop your picture</h2><p class="small">Drag the sliders to frame the part you want to keep.</p><div class="crop-stage"><img class="crop-image" alt="Picture crop preview"></div><label class="field" for="crop-ratio">Shape</label><select class="input" id="crop-ratio"><option value="4/3">Landscape 4:3</option><option value="1/1">Square</option><option value="16/9">Wide 16:9</option></select><label class="field" for="crop-zoom">Zoom</label><input class="input crop-range" id="crop-zoom" type="range" min="1" max="3" step="0.01" value="1"><div class="crop-range-row"><label class="field" for="crop-x">Left / right</label><input class="input crop-range" id="crop-x" type="range" min="-1" max="1" step="0.01" value="0"></div><div class="crop-range-row"><label class="field" for="crop-y">Up / down</label><input class="input crop-range" id="crop-y" type="range" min="-1" max="1" step="0.01" value="0"></div><div class="actions crop-actions"><button type="button" class="btn subtle" data-crop-cancel>Cancel</button><button type="button" class="btn primary" data-crop-save>Use this crop</button></div></div>`;
+  modal.innerHTML = `<div class="crop-card"><h2>Crop your picture</h2><p class="small">Drag the picture to reposition it. Use the zoom control to frame it.</p><div class="crop-stage" aria-label="Drag to reposition the picture"><img class="crop-image" alt="Picture crop preview"></div><label class="field" for="crop-ratio">Shape</label><select class="input" id="crop-ratio"><option value="4/3">Landscape 4:3</option><option value="1/1">Square</option><option value="16/9">Wide 16:9</option></select><label class="field" for="crop-zoom">Zoom</label><input class="input crop-range" id="crop-zoom" type="range" min="1" max="3" step="0.01" value="1"><div class="actions crop-actions"><button type="button" class="btn subtle" data-crop-cancel>Cancel</button><button type="button" class="btn primary" data-crop-save>Use this crop</button></div></div>`;
   app.append(modal);
   const stage = modal.querySelector('.crop-stage'), image = modal.querySelector('.crop-image');
-  const zoom = modal.querySelector('#crop-zoom'), horizontal = modal.querySelector('#crop-x'), vertical = modal.querySelector('#crop-y');
+  const zoom = modal.querySelector('#crop-zoom');
+  let positionX = 0, positionY = 0, pointerX = 0, pointerY = 0, dragging = false;
   const updatePreview = () => {
     if (!image.naturalWidth || !stage.clientWidth) return;
     const width = stage.clientWidth, height = stage.clientHeight;
     const scale = Math.max(width / image.naturalWidth, height / image.naturalHeight) * Number(zoom.value);
     const imageWidth = image.naturalWidth * scale, imageHeight = image.naturalHeight * scale;
     image.style.width = `${imageWidth}px`; image.style.height = `${imageHeight}px`;
-    image.style.left = `${(width - imageWidth) * (Number(horizontal.value) + 1) / 2}px`;
-    image.style.top = `${(height - imageHeight) * (Number(vertical.value) + 1) / 2}px`;
+    image.style.left = `${(width - imageWidth) * (positionX + 1) / 2}px`;
+    image.style.top = `${(height - imageHeight) * (positionY + 1) / 2}px`;
   };
   const cropButton = modal.querySelector('[data-crop-save]'); cropButton.disabled = true;
   image.onload = () => { cropButton.disabled = false; updatePreview(); }; image.src = source;
-  for (const input of [zoom, horizontal, vertical]) input.addEventListener('input', updatePreview);
+  zoom.addEventListener('input', updatePreview);
+  stage.addEventListener('pointerdown', event => {
+    if (event.button !== 0) return;
+    dragging = true; pointerX = event.clientX; pointerY = event.clientY;
+    stage.classList.add('dragging'); stage.setPointerCapture(event.pointerId); event.preventDefault();
+  });
+  stage.addEventListener('pointermove', event => {
+    if (!dragging) return;
+    const bounds = stage.getBoundingClientRect(), picture = image.getBoundingClientRect();
+    if (picture.width > bounds.width) positionX = Math.max(-1, Math.min(1, positionX + (event.clientX - pointerX) * 2 / (bounds.width - picture.width)));
+    if (picture.height > bounds.height) positionY = Math.max(-1, Math.min(1, positionY + (event.clientY - pointerY) * 2 / (bounds.height - picture.height)));
+    pointerX = event.clientX; pointerY = event.clientY; updatePreview();
+  });
+  const stopDragging = () => { dragging = false; stage.classList.remove('dragging'); };
+  stage.addEventListener('pointerup', stopDragging); stage.addEventListener('pointercancel', stopDragging); stage.addEventListener('lostpointercapture', stopDragging);
   modal.querySelector('#crop-ratio').onchange = event => { stage.style.aspectRatio = event.target.value; requestAnimationFrame(updatePreview); };
   window.addEventListener('resize', updatePreview);
   const close = () => { window.removeEventListener('resize', updatePreview); modal.remove(); };
