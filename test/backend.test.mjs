@@ -38,7 +38,7 @@ test('a live room provides a scannable player-join QR image', async t => {
 
 test('starting a quiz counts down, previews the first question, then opens answers automatically', async t => {
   const f = await fixture(t, { startCountdownMs: 100, firstPreviewMs: 120 });
-  const viewQuiz = { ...quiz, questions: [{ ...quiz.questions[0], answers: ['Four', 'Five', 'Six', 'Seven'] }] };
+  const viewQuiz = { ...quiz, questions: quiz.questions.map(question => ({ ...question, answers: ['Four', 'Five', 'Six', 'Seven'] })) };
   const room = (await f.request('/api/rooms', { method: 'POST', body: { quiz: viewQuiz } })).data;
   const route = `/api/rooms/${room.pin}`;
   const player = (await f.request(`${route}/join`, { method: 'POST', body: { nickname: 'Ready' } })).data.playerToken;
@@ -65,6 +65,14 @@ test('starting a quiz counts down, previews the first question, then opens answe
   assert.equal((await f.request(`${route}/toggle-view`, { method: 'POST', token: room.hostToken })).data.answerOnly, true);
   assert.equal((await state(player)).answerOnly, true, 'the answer-only view is shared with players');
   assert.equal((await f.request(`${route}/toggle-view`, { method: 'POST', token: room.hostToken })).data.answerOnly, false);
+  await f.request(`${route}/next`, { method: 'POST', token: room.hostToken });
+  await f.request(`${route}/next`, { method: 'POST', token: room.hostToken });
+  const secondPreview = await waitFor(player, 'preview');
+  assert.equal(secondPreview.question.question, viewQuiz.questions[1].question);
+  assert.equal(secondPreview.question.answers, undefined);
+  assert.ok(secondPreview.previewEndsAt > Date.now(), 'the next question also gets a timed preview');
+  const secondQuestion = await waitFor(player, 'question');
+  assert.deepEqual(secondQuestion.question.answers, viewQuiz.questions[1].answers);
 });
 
 test('multiplayer flow enforces authorization, secrecy, one answer, scoring and final ranking', async t => {

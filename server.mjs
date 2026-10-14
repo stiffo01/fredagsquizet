@@ -148,7 +148,7 @@ export function createApp({ dataDir = process.env.DATA_DIR || path.join(baseDir,
     room.index++;
     if (room.index >= room.quiz.questions.length) { room.index = room.quiz.questions.length - 1; room.status = 'finished'; room.scoreboardVisible = false; room.scoreboardDeleted = false; broadcast(room); return; }
     for (const p of room.players.values()) { p.answer = undefined; p.points = 0; p.correct = false; }
-    showPreview(room);
+    showPreview(room, true);
   };
   const openAnswers = room => {
     clearTimeout(room.timer); room.previewEndsAt = undefined;
