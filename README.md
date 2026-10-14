@@ -1,4 +1,4 @@
-# QuizPop!
+# Fredagsquizet
 
 A self-hosted multiplayer quiz game inspired by the Kahoot PIN-and-nickname experience, packaged for Docker Compose. Hosts create quizzes, share a game PIN, run timed questions, and show results and a final leaderboard. Players join from their own browsers. The server uses Node.js with no third-party runtime dependencies.
 
@@ -29,7 +29,7 @@ QUIZ_PORT=8090 docker compose up --build -d
 View logs or stop the application:
 
 ```sh
-docker compose logs -f quiz
+docker compose logs -f fredagsquizet
 docker compose down
 ```
 
@@ -75,3 +75,11 @@ Every question starts in **preview** on both host and player screens, displaying
 Existing quizzes work as multiple-choice questions without needing conversion. The included curiosity quiz demonstrates all four types.
 
 Uploaded pictures live in `/app/data/media` in the same persistent Docker volume as quizzes. Include that directory when backing up. Removing a picture from a question does not immediately delete its file, since another quiz or active game may use it. Uploaded pictures are accessible to anyone with their image URL on this server; only upload material intended for your players.
+
+## Paste pictures and default artwork
+
+Copy an image, click **Paste picture here** on the desired question, and press **Ctrl+V** (or **⌘V** on Mac). Pasting while editing that question's heading or answer also attaches the image to that question; ordinary text paste works normally. Copy the image itself, not just its URL. Clipboard images use the same validation and persistent storage as file uploads, and the paste gesture works on local-network HTTP without requesting clipboard-read access.
+
+Questions without an uploaded or pasted picture automatically show original colourful quiz-themed artwork. Each question type has its own illustration, shown in the editor, preview, answering, and results. Removing a custom picture restores the default. No external image service is needed.
+
+The application and Compose service are named **Fredagsquizet** (`fredagsquizet` in Compose). Existing browser ownership/session keys and the `quiz-data` volume remain unchanged so the rename preserves saved quizzes.

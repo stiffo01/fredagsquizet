@@ -23,7 +23,7 @@ async function run(button, action) {
   finally { if (button?.isConnected) button.disabled = false; }
 }
 function joinPage(pin='') {
-  app.innerHTML = `<section class="join"><p class="eyebrow">Big questions. Good company.</p><h1 class="hero-logo">QuizPop<span>!</span></h1><p class="subtitle">Gather your people.<br>Let the game begin.</p><form class="card" id="join-form"><label class="field" for="pin">Got a game PIN?</label><input class="input pin-input" id="pin" name="pin" inputmode="numeric" autocomplete="off" pattern="[0-9]{6}" maxlength="6" placeholder="Game PIN" value="${escapeHTML(pin)}" required aria-label="Six-digit game PIN"><button class="btn wide" type="submit">Enter <span aria-hidden="true">→</span></button></form><p class="join-note">Bringing everyone together? <a href="#host">Host a quiz</a></p><div class="shape-row" aria-hidden="true"><span>▲</span><span>◆</span><span>●</span><span>■</span></div><p class="small muted-white">One screen to host. Any device to play.</p></section>`;
+  app.innerHTML = `<section class="join"><p class="eyebrow">Big questions. Good company.</p><h1 class="hero-logo">Fredags<span>quizet</span></h1><p class="subtitle">Gather your people.<br>Let the game begin.</p><form class="card" id="join-form"><label class="field" for="pin">Got a game PIN?</label><input class="input pin-input" id="pin" name="pin" inputmode="numeric" autocomplete="off" pattern="[0-9]{6}" maxlength="6" placeholder="Game PIN" value="${escapeHTML(pin)}" required aria-label="Six-digit game PIN"><button class="btn wide" type="submit">Enter <span aria-hidden="true">→</span></button></form><p class="join-note">Bringing everyone together? <a href="#host">Host a quiz</a></p><div class="shape-row" aria-hidden="true"><span>▲</span><span>◆</span><span>●</span><span>■</span></div><p class="small muted-white">One screen to host. Any device to play.</p></section>`;
   document.querySelector('#join-form').onsubmit = event => {
     event.preventDefault(); const pin = document.querySelector('#pin').value.trim();
     nicknamePage(pin);
@@ -65,6 +65,7 @@ function readDraft() {
     timeLimit: Number(el.querySelector('[data-time]').value)
   }));
 }
+const defaultPicture = q => `/images/${Object.hasOwn(questionTypes, q.type) ? q.type : 'quiz'}.svg`;
 function editorQuestion(q, i) {
   const type = q.type || 'quiz';
   let answers;
@@ -77,7 +78,7 @@ function editorQuestion(q, i) {
     <div class="question-heading"><h2>Question ${i + 1}</h2><button class="btn subtle" type="button" data-remove="${i}" ${draft.questions.length === 1 ? 'disabled' : ''} aria-label="Remove question ${i + 1}">Remove</button></div>
     <label class="field" for="type-${i}">Question type</label><select class="input type-select" id="type-${i}" data-type="${i}">${Object.entries(questionTypes).map(([value, label]) => `<option value="${value}" ${value === type ? 'selected' : ''}>${label}</option>`).join('')}</select>
     <label class="field" for="question-${i}">Question heading</label><textarea class="input" id="question-${i}" data-question maxlength="500" required rows="2" placeholder="Type your question…">${escapeHTML(q.question)}</textarea>
-    <div class="image-editor">${q.image ? `<img class="editor-image" src="${escapeHTML(q.image)}" alt="${escapeHTML(q.imageAlt || 'Question image')}"><button class="btn subtle" type="button" data-remove-image="${i}">Remove picture</button>` : '<p class="small">Add a picture to bring your question to life.</p>'}<label class="field" for="image-${i}">${q.image ? 'Replace picture' : 'Upload picture'}</label><input class="input" id="image-${i}" type="file" accept="image/png,image/jpeg,image/webp,image/gif" data-image="${i}"><p class="small">PNG, JPEG, WebP or GIF · up to 5 MB. Shown before answers open.</p>${q.image ? `<label class="field" for="alt-${i}">Picture description</label><input class="input" id="alt-${i}" data-image-alt maxlength="200" placeholder="Describe the picture for players using a screen reader" value="${escapeHTML(q.imageAlt)}">` : ''}</div>
+    <div class="image-editor">${q.image ? `<img class="editor-image" src="${escapeHTML(q.image)}" alt="${escapeHTML(q.imageAlt || 'Question image')}"><button class="btn subtle" type="button" data-remove-image="${i}">Remove picture</button>` : `<img class="default-image" src="${defaultPicture(q)}" alt="Colourful quiz illustration"><p class="small">Standard quiz picture · add your own to replace it.</p>`}<button class="btn subtle paste-target" type="button">Paste picture here · Ctrl+V / ⌘V</button><label class="field" for="image-${i}">${q.image ? 'Replace picture' : 'Upload picture'}</label><input class="input" id="image-${i}" type="file" accept="image/png,image/jpeg,image/webp,image/gif" data-image="${i}"><p class="small">Copy an image, click the paste area and press Ctrl+V (⌘V on Mac), or choose a file. PNG, JPEG, WebP or GIF · up to 5 MB.</p>${q.image ? `<label class="field" for="alt-${i}">Picture description</label><input class="input" id="alt-${i}" data-image-alt maxlength="200" placeholder="Describe the picture for players using a screen reader" value="${escapeHTML(q.imageAlt)}">` : ''}</div>
     ${answers}<div class="form-row"><label class="field" for="time-${i}" style="margin:0">Answer time</label><select class="input" id="time-${i}" data-time>${[...new Set([5,10,20,30,60,90,120,q.timeLimit])].sort((a,b) => a-b).map(t => `<option value="${t}" ${q.timeLimit === t ? 'selected' : ''}>${t} sec</option>`).join('')}</select><span class="small">Starts when the host opens answers.</span></div>
   </article>`;
 }
@@ -93,9 +94,11 @@ function editor() {
     editor();
   });
   app.querySelectorAll('[data-remove-image]').forEach(button => button.onclick = () => { readDraft(); draft.questions[Number(button.dataset.removeImage)].image = ''; editor(); });
-  app.querySelectorAll('[data-image]').forEach(input => input.onchange = async () => {
-    const file = input.files[0]; if (!file) return;
-    const version = routeVersion; readDraft(); const q = draft.questions[Number(input.dataset.image)];
+  let uploading = false;
+  const uploadPicture = async (file, index) => {
+    if (!file) return;
+    if (uploading) return; uploading = true;
+    const version = routeVersion; readDraft(); const q = draft.questions[index];
     app.querySelectorAll('#editor-form input, #editor-form textarea, #editor-form select, #editor-form button').forEach(el => el.disabled = true);
     try {
       if (file.size > 5 * 1024 * 1024) throw new Error('Choose an image no larger than 5 MB.');
@@ -105,8 +108,14 @@ function editor() {
       const result = await response.json(); if (!response.ok) throw new Error(result.error);
       if (version === routeVersion) q.image = result.image;
     } catch (error) { toast(error.message || 'This picture could not be read. Try a PNG or JPEG.'); }
-    finally { if (version === routeVersion) editor(); }
-  });
+    finally { uploading = false; if (version === routeVersion) editor(); }
+  };
+  app.querySelectorAll('[data-image]').forEach(input => input.onchange = () => uploadPicture(input.files[0], Number(input.dataset.image)));
+  app.querySelectorAll('.question-editor').forEach((question, index) => question.addEventListener('paste', event => {
+    const image = [...(event.clipboardData?.items || [])].find(item => item.kind === 'file' && item.type.startsWith('image/'));
+    if (!image) return; // Keep ordinary text paste intact in headings and answers.
+    event.preventDefault(); uploadPicture(image.getAsFile(), index);
+  }));
   document.querySelector('#editor-form').onsubmit = event => { event.preventDefault(); run(event.submitter, async () => {
     readDraft(); const version = routeVersion;
     await api(draft.id ? `/quizzes/${draft.id}` : '/quizzes', {method:draft.id ? 'PUT' : 'POST', body:draft});
@@ -133,9 +142,9 @@ function leaderboard(players) {
 function questionContent(s) {
   const q = s.question, host = s.host, preview = s.status === 'preview', reveal = s.status === 'reveal';
   const typed = q.type === 'type-answer', poll = q.type === 'poll';
-  const image = q.image ? `<figure class="question-picture"><img src="${escapeHTML(q.image)}" alt="${escapeHTML(q.imageAlt || 'Question picture')}"></figure>` : '';
+  const image = `<figure class="question-picture"><img src="${escapeHTML(q.image || defaultPicture(q))}" alt="${escapeHTML(q.image ? q.imageAlt || 'Question picture' : 'Colourful quiz illustration')}"></figure>`;
   const heading = `<p class="eyebrow">${escapeHTML(questionTypes[q.type] || questionTypes.quiz)} · Question ${s.questionIndex + 1} of ${s.questionCount}</p><h1>${escapeHTML(q.question)}</h1>${image}`;
-  if (preview) return `${heading}<div class="preview-note"><span class="badge">TAKE A LOOK</span><p>Read the question${q.image ? ' and study the picture' : ''}. Answers will open next.</p></div>${host ? '<button class="btn light" data-action="open">Open answers →</button>' : '<p class="muted-white">Waiting for the host to open answers…</p>'}`;
+  if (preview) return `${heading}<div class="preview-note"><span class="badge">TAKE A LOOK</span><p>Read the question and study the picture. Answers will open next.</p></div>${host ? '<button class="btn light" data-action="open">Open answers →</button>' : '<p class="muted-white">Waiting for the host to open answers…</p>'}`;
   let controls;
   if (typed) {
     controls = reveal ? `<div class="feedback">Accepted answers: ${q.acceptedAnswers.map(escapeHTML).join(' · ')}</div>` : host ? '<p class="waiting-answer">Players are typing their answers…</p>' : s.self.answered ? '<p class="waiting-answer">Answer locked in. Fingers crossed!</p>' : `<form id="typed-answer-form" class="card typed-answer"><label class="field" for="typed-answer">Your answer</label><input class="input" id="typed-answer" data-question-index="${s.questionIndex}" maxlength="200" required autocomplete="off" placeholder="Type your answer…"><button class="btn primary wide" type="submit">Lock in answer →</button></form>`;

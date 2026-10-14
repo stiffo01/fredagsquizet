@@ -50,12 +50,30 @@ try {
     if(type==='type-answer') await host.evaluate(`document.querySelector('[data-accepted]').value='Stockholm';`);
     if(type==='poll') await host.evaluate(`document.querySelectorAll('.question-editor')[3].querySelectorAll('[data-answer]').forEach((el,i)=>el.value=['Red','Blue','Green','Yellow'][i]);`);
   }
+  assert.equal(await host.evaluate('document.title'),'Fredagsquizet — Play together');
+  assert.equal(await host.evaluate('document.querySelectorAll(".default-image").length'),3);
+  const pastePicture = async () => host.evaluate(`(async () => {
+    const source=document.querySelector('.editor-image').src;
+    const blob=await fetch(source).then(r=>r.blob());
+    const transfer=new DataTransfer();transfer.items.add(new File([blob],'pasted.png',{type:'image/png'}));
+    document.querySelectorAll('.paste-target')[1].dispatchEvent(new ClipboardEvent('paste',{clipboardData:transfer,bubbles:true,cancelable:true}));
+  })()`);
+  await pastePicture();
+  await host.wait('document.querySelectorAll(".editor-image").length===2');
+  await host.click('[data-remove-image="1"]');
+  assert.equal(await host.evaluate('document.querySelectorAll(".default-image").length'),3,'removing custom image restores artwork');
+  await pastePicture();
+  await host.wait('document.querySelectorAll(".editor-image").length===2');
+  assert.equal(await host.evaluate(`
+    const clipboard=new DataTransfer();clipboard.setData('text/plain','Ordinary text');
+    document.querySelector('#question-1').dispatchEvent(new ClipboardEvent('paste',{clipboardData:clipboard,bubbles:true,cancelable:true}));
+  `),true,'ordinary text paste is not intercepted');
   await host.evaluate(`document.querySelector('#editor-form').requestSubmit()`);
   await host.wait('!!document.querySelector("[data-host]:not([data-host=sample])")');
   await host.click('[data-edit]:not([data-edit=sample])');
   await host.wait('document.querySelectorAll(".question-editor").length===4');
   await host.call('Page.reload');
-  await host.wait('!!document.querySelector(".editor-image")');
+  await host.wait('document.querySelectorAll(".editor-image").length===2');
   assert.equal(await host.evaluate('document.querySelector("[data-image-alt]").value'),'Example picture');
   assert.deepEqual(await host.evaluate('[...document.querySelectorAll("[data-type]")].map(el=>el.value)'),['quiz','true-false','type-answer','poll']);
   await host.evaluate(`location.hash='host'`);
@@ -102,6 +120,8 @@ try {
   await host.click('[data-action=next]');
   await host.wait('!!document.querySelector("[data-action=open]")');await host.click('[data-action=open]');
   await alice.wait('!!document.querySelector("#typed-answer")');await bob.wait('!!document.querySelector("#typed-answer")');
+  await alice.wait('document.querySelector(".question-picture img")?.naturalWidth > 0');
+  assert.ok(await alice.evaluate('document.querySelector(".question-picture img").src.endsWith("/images/type-answer.svg")'));
   await alice.evaluate(`document.querySelector('#typed-answer').value='  STOCKHOLM  ';document.querySelector('#typed-answer').focus();`);
   await bob.evaluate(`document.querySelector('#typed-answer').value='Paris';document.querySelector('#typed-answer-form').requestSubmit();`);
   await alice.wait('document.querySelector(".answer-count").textContent.includes("1 / 2")');
@@ -124,7 +144,7 @@ try {
   await alice.call('Emulation.setDeviceMetricsOverride',{width:390,height:844,deviceScaleFactor:1,mobile:true});
   assert.equal(await alice.evaluate('document.documentElement.scrollWidth <= innerWidth'),true,'mobile page must not overflow');
   for(const p of [host,alice,bob])assert.deepEqual(p.exceptions,[],'no uncaught browser exceptions');
-  console.log('PASS: image upload and saved editor reload; heading/image preview; four question types; two players; typed draft survives SSE; poll results; podium and host refresh; mobile width. No screenshots captured.');
+  console.log('PASS: Fredagsquizet branding; image upload, clipboard paste, removal fallback and saved editor reload; heading/image preview; four question types; two players; typed draft survives SSE; poll results; podium and host refresh; mobile width. No screenshots captured.');
 } catch (error) {
   console.error(error); throw error;
 } finally {

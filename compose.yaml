@@ -1,5 +1,6 @@
 services:
-  quiz:
+  fredagsquizet:
+    container_name: fredagsquizet
     build: .
     ports:
       - "${QUIZ_BIND:-0.0.0.0}:${QUIZ_PORT:-8095}:3000"

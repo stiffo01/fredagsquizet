@@ -196,6 +196,6 @@ export function createApp({ dataDir = process.env.DATA_DIR || path.join(baseDir,
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   const app = createApp(); const port = Number(process.env.PORT || 3000);
-  app.server.listen(port, '0.0.0.0', () => console.log(`Quiz live at http://localhost:${port}`));
+  app.server.listen(port, '0.0.0.0', () => console.log(`Fredagsquizet live at http://localhost:${port}`));
   for (const signal of ['SIGINT', 'SIGTERM']) process.on(signal, async () => { await app.close(); process.exit(0); });
 }
