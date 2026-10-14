@@ -21,7 +21,7 @@ Open **http://localhost:8095** on the server machine. For a shared game, the hos
 
 1. Open the host area at `/host` and sign in with the configured Basic Auth credentials. Choose the included quiz or create a quiz.
 2. Host the quiz and share its six-digit PIN.
-3. Players open the same site, enter the PIN, and choose a nickname.
+3. Players open the same site, enter the PIN, and choose a nickname and emoji.
 4. Start after players join, then advance through the results and questions.
 
 The default binding is all network interfaces so players can join over LAN. Set `QUIZ_BIND=127.0.0.1` for access only from this computer. This app is intended for trusted local networks; use a TLS reverse proxy and appropriate access controls before any Internet deployment.
@@ -73,7 +73,7 @@ In **Create quiz** or **Edit**, choose a question type for each question:
 - **Type an answer:** enter up to 10 accepted answers, one per line. Players type their response. Matching ignores capitalization and extra whitespace, with Unicode normalization; punctuation still matters.
 - **Poll:** players vote on one choice. Results show vote counts; this round awards no points and has no leaderboard. A quiz containing only polls has no final winner.
 
-Use **Upload picture** under the question heading to add a PNG, JPEG, WebP, or GIF (maximum 50 MB; the editor accepts up to 30 megapixels). Add a description for accessibility. Pictures can be replaced or removed in the editor and remain visible during answering and results.
+Use **Upload cover picture** near the quiz title to add an image shown on that quiz's library card. Use **Upload picture** under a question heading to add an image for that question. Both accept PNG, JPEG, WebP, or GIF (maximum 50 MB; the editor accepts up to 30 megapixels). You can also paste a copied image. Add a description for accessibility. Pictures can be replaced or removed in the editor.
 
 Every question starts in **preview** on both host and player screens, displaying only the heading and optional picture. The host clicks **Open answers** to show the choices or typed-answer field and start the full answer timer. Preview has no timer; it survives refreshing the host screen. Correct answers and accepted typed responses stay hidden until the reveal.
 
@@ -84,6 +84,8 @@ Uploaded pictures live in `/app/data/media` in the same persistent Docker volume
 ## Paste pictures and default artwork
 
 Copy an image, click **Paste picture here** on the desired question, and press **Ctrl+V** (or **⌘V** on Mac). The app listens for pasted image files anywhere inside that question, including the paste button, heading, and answers; ordinary text paste works normally. Copy the image itself, not just its URL. Clipboard images use the same validation and persistent storage as file uploads, and the paste gesture works on local-network HTTP without requesting clipboard-read access.
+
+Quiz cover pictures support the same paste workflow using **Paste cover picture here**. Players choose one of the available emojis after entering the game PIN; the chosen emoji appears beside their nickname in the lobby and scoreboards.
 
 Questions without an uploaded or pasted picture automatically show original colourful quiz-themed artwork. Each question type has its own illustration, shown in the editor, preview, answering, and results. Removing a custom picture restores the default. No external image service is needed.
 

@@ -6,8 +6,9 @@ const escapeHTML = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'
 const randomToken = () => Array.from(crypto.getRandomValues(new Uint8Array(24)), b => b.toString(16).padStart(2, '0')).join('');
 let ownerToken = localStorage.getItem('quizpop-owner');
 if (!ownerToken) { ownerToken = randomToken(); localStorage.setItem('quizpop-owner', ownerToken); }
-let stream, roomState, session, timer, quizzes = [], draft, routeVersion = 0;
+let stream, roomState, session, timer, pasteUploadHandler, quizzes = [], draft, routeVersion = 0;
 const questionTypes = {'quiz':'Multiple choice', 'true-false':'True or false', 'type-answer':'Type an answer', 'poll':'Poll'};
+const playerEmojis = ['😀', '😎', '🤓', '🥳', '🐸', '🦊', '🐼', '🐙', '🦄', '🐧', '🐢', '🦖', '🍕', '🚀', '⭐', '👾'];
 const newQuestion = () => ({type:'quiz', question:'', image:'', imageAlt:'', answers:['','','',''], correctIndex:0, timeLimit:20});
 function toast(message) { const el = document.querySelector('#toast'); el.textContent = message; el.hidden = false; clearTimeout(toast.timeout); toast.timeout = setTimeout(() => el.hidden = true, 6000); }
 async function api(path, {method='GET', body, token=ownerToken} = {}) {
@@ -33,18 +34,23 @@ function joinPage(pin='') {
   };
 }
 function nicknamePage(pin) {
-  app.innerHTML = `<section class="join"><p class="eyebrow">Game PIN ${escapeHTML(pin)}</p><h1 class="hero-logo">You're in<span>?</span></h1><p class="subtitle">Every legend needs a name.</p><form class="card" id="nickname-form"><label class="field" for="nickname">Your nickname</label><input class="input" id="nickname" name="nickname" maxlength="24" autocomplete="nickname" placeholder="Quiz wizard" required><button class="btn wide" type="submit">Let's go! <span aria-hidden="true">→</span></button></form><p class="join-note"><a href="#" id="back-pin">Use a different PIN</a></p></section>`;
+  let selectedEmoji = playerEmojis[0];
+  app.innerHTML = `<section class="join"><p class="eyebrow">Game PIN ${escapeHTML(pin)}</p><h1 class="hero-logo">You're in<span>?</span></h1><p class="subtitle">Pick your name and game emoji.</p><form class="card" id="nickname-form"><label class="field" for="nickname">Your nickname</label><input class="input" id="nickname" name="nickname" maxlength="24" autocomplete="nickname" placeholder="Quiz wizard" required><span class="field" style="margin-top:18px">Choose your emoji</span><div class="emoji-picker" role="group" aria-label="Choose a player emoji">${playerEmojis.map((emoji,i) => `<button type="button" class="emoji-choice${i===0?' selected':''}" data-emoji="${emoji}" aria-label="Play as ${emoji}" aria-pressed="${i===0}">${emoji}</button>`).join('')}</div><button class="btn wide" type="submit">Let's go! <span aria-hidden="true">→</span></button></form><p class="join-note"><a href="#" id="back-pin">Use a different PIN</a></p></section>`;
   document.querySelector('#nickname').focus();
+  app.querySelectorAll('[data-emoji]').forEach(button => button.onclick = () => {
+    selectedEmoji = button.dataset.emoji;
+    app.querySelectorAll('[data-emoji]').forEach(choice => { const selected = choice === button; choice.classList.toggle('selected', selected); choice.setAttribute('aria-pressed', String(selected)); });
+  });
   document.querySelector('#back-pin').onclick = event => { event.preventDefault(); joinPage(pin); };
   document.querySelector('#nickname-form').onsubmit = event => { event.preventDefault(); run(event.submitter, async () => {
-    const result = await api(`/rooms/${pin}/join`, {method:'POST', token:null, body:{nickname:document.querySelector('#nickname').value.trim()}});
+    const result = await api(`/rooms/${pin}/join`, {method:'POST', token:null, body:{nickname:document.querySelector('#nickname').value.trim(), emoji:selectedEmoji}});
     saveSession({pin, token:result.playerToken, role:'player'});
   }); };
 }
 async function library(version) {
   app.innerHTML = '<section class="shell"><span class="spinner"></span><p style="text-align:center">Opening your quiz library…</p></section>';
   quizzes = await api('/quizzes'); if (version !== routeVersion) return;
-  app.innerHTML = `<section class="shell"><div class="topline"><div><p class="eyebrow">The host's corner</p><h1>Your next great game.</h1><p>Pick a quiz, share the PIN, and bring the room to life.</p></div><a class="btn light" href="#create">＋ Create quiz</a></div><div class="quiz-grid">${quizzes.map((q,i) => `<article class="card quiz-card"><div class="quiz-art" aria-hidden="true">${['✦','◎','✷'][i%3]}</div><div class="quiz-body"><div><span class="badge">${q.id==='sample'?'READY TO PLAY':'YOUR CREATION'}</span></div><h2 style="margin-top:14px">${escapeHTML(q.title)}</h2><span class="small">${q.questions.length} questions · ${Math.ceil(q.questions.reduce((n,q)=>n+q.timeLimit,0)/60)} min of play</span><div class="actions"><button class="btn primary" data-host="${escapeHTML(q.id)}">Host live →</button><button class="btn subtle" data-edit="${escapeHTML(q.id)}">${q.id==='sample'?'Copy':'Edit'}</button>${q.id==='sample'?'':`<button class="btn subtle" data-delete="${escapeHTML(q.id)}" aria-label="Delete ${escapeHTML(q.title)}">×</button>`}</div></div></article>`).join('')}</div><p class="small muted-white" style="margin-top:28px">Your quizzes are saved on this server. Use this browser to manage them.</p></section>`;
+  app.innerHTML = `<section class="shell"><div class="topline"><div><p class="eyebrow">The host's corner</p><h1>Your next great game.</h1><p>Pick a quiz, share the PIN, and bring the room to life.</p></div><a class="btn light" href="#create">＋ Create quiz</a></div><div class="quiz-grid">${quizzes.map((q,i) => `<article class="card quiz-card"><div class="quiz-art">${q.coverImage ? `<img class="quiz-cover-thumb" src="${escapeHTML(q.coverImage)}" alt="${escapeHTML(q.coverImageAlt || `${q.title} cover`)}">` : `<span aria-hidden="true">${['✦','◎','✷'][i%3]}</span>`}</div><div class="quiz-body"><div><span class="badge">${q.id==='sample'?'READY TO PLAY':'YOUR CREATION'}</span></div><h2 style="margin-top:14px">${escapeHTML(q.title)}</h2><span class="small">${q.questions.length} questions · ${Math.ceil(q.questions.reduce((n,q)=>n+q.timeLimit,0)/60)} min of play</span><div class="actions"><button class="btn primary" data-host="${escapeHTML(q.id)}">Host live →</button><button class="btn subtle" data-edit="${escapeHTML(q.id)}">${q.id==='sample'?'Copy':'Edit'}</button>${q.id==='sample'?'':`<button class="btn subtle" data-delete="${escapeHTML(q.id)}" aria-label="Delete ${escapeHTML(q.title)}">×</button>`}</div></div></article>`).join('')}</div><p class="small muted-white" style="margin-top:28px">Your quizzes are saved on this server. Use this browser to manage them.</p></section>`;
   app.querySelectorAll('[data-host]').forEach(button => button.onclick = () => run(button, async () => {
     const result = await api('/rooms', {method:'POST', body:{quizId:button.dataset.host}});
     saveSession({pin:result.pin, token:result.hostToken, role:'host'});
@@ -57,6 +63,7 @@ async function library(version) {
 }
 function readDraft() {
   draft.title = document.querySelector('#quiz-title').value;
+  draft.coverImageAlt = document.querySelector('[data-cover-alt]')?.value || '';
   draft.questions = [...app.querySelectorAll('.question-editor')].map((el, i) => ({
     ...draft.questions[i],
     type: el.querySelector('[data-type]').value,
@@ -86,7 +93,8 @@ function editorQuestion(q, i) {
   </article>`;
 }
 function editor() {
-  app.innerHTML = `<section class="shell editor"><div class="topline"><div><p class="eyebrow">Make it your own</p><h1>${draft.id ? 'Edit your quiz' : 'A great game starts here.'}</h1><p>Mix question types, add pictures, and set the pace.</p></div><a class="btn ghost" href="/host#host">Back to library</a></div><form id="editor-form"><label class="field" for="quiz-title">Quiz title</label><input class="input editor-title" id="quiz-title" placeholder="Give your quiz a name" maxlength="120" required value="${escapeHTML(draft.title)}">${draft.questions.map(editorQuestion).join('')}<div class="savebar"><button class="btn ghost" id="add-question" type="button" ${draft.questions.length >= 50 ? 'disabled' : ''}>＋ Add question</button><button class="btn light" type="submit">Save quiz ✓</button></div></form></section>`;
+  if (pasteUploadHandler) document.removeEventListener('paste', pasteUploadHandler, true);
+  app.innerHTML = `<section class="shell editor"><div class="topline"><div><p class="eyebrow">Make it your own</p><h1>${draft.id ? 'Edit your quiz' : 'A great game starts here.'}</h1><p>Mix question types, add pictures, and set the pace.</p></div><a class="btn ghost" href="/host#host">Back to library</a></div><form id="editor-form"><label class="field" for="quiz-title">Quiz title</label><input class="input editor-title" id="quiz-title" placeholder="Give your quiz a name" maxlength="120" required value="${escapeHTML(draft.title)}"><section class="card image-editor quiz-cover-editor"><h2 class="question-heading">Quiz cover picture</h2>${draft.coverImage ? `<img class="editor-cover" src="${escapeHTML(draft.coverImage)}" alt="${escapeHTML(draft.coverImageAlt || 'Quiz cover picture')}"><button class="btn subtle" type="button" data-remove-cover>Remove cover picture</button>` : `<img class="default-image" src="/images/quiz.svg" alt="Colourful quiz-themed cover"><p class="small">Standard quiz artwork is used on the library card until you add a cover.</p>`}<button class="btn subtle paste-target" type="button" data-cover-paste>Paste cover picture here · Ctrl+V / ⌘V</button><label class="field" for="cover-image">${draft.coverImage ? 'Replace cover picture' : 'Upload cover picture'}</label><input class="input" id="cover-image" type="file" accept="image/png,image/jpeg,image/webp,image/gif" data-cover-image><p class="small">Copy an image, click here and press Ctrl+V (⌘V on Mac), or choose a file. PNG, JPEG, WebP or GIF · up to 50 MB.</p>${draft.coverImage ? `<label class="field" for="cover-alt">Picture description</label><input class="input" id="cover-alt" data-cover-alt maxlength="200" placeholder="Describe the cover picture" value="${escapeHTML(draft.coverImageAlt || '')}">` : ''}</section>${draft.questions.map(editorQuestion).join('')}<div class="savebar"><button class="btn ghost" id="add-question" type="button" ${draft.questions.length >= 50 ? 'disabled' : ''}>＋ Add question</button><button class="btn light" type="submit">Save quiz ✓</button></div></form></section>`;
   document.querySelector('#add-question').onclick = () => { readDraft(); draft.questions.push(newQuestion()); editor(); app.querySelectorAll('.question-editor')[draft.questions.length - 1].scrollIntoView({block:'center',behavior:'smooth'}); };
   app.querySelectorAll('[data-remove]').forEach(button => button.onclick = () => { readDraft(); draft.questions.splice(Number(button.dataset.remove), 1); editor(); });
   app.querySelectorAll('[data-type]').forEach(select => select.onchange = () => {
@@ -97,11 +105,12 @@ function editor() {
     editor();
   });
   app.querySelectorAll('[data-remove-image]').forEach(button => button.onclick = () => { readDraft(); draft.questions[Number(button.dataset.removeImage)].image = ''; editor(); });
+  app.querySelector('[data-remove-cover]')?.addEventListener('click', () => { readDraft(); draft.coverImage = ''; draft.coverImageAlt = ''; editor(); });
   let uploading = false;
-  const uploadPicture = async (file, index) => {
+  const uploadPicture = async (file, target) => {
     if (!file) return;
     if (uploading) return; uploading = true;
-    const version = routeVersion; readDraft(); const q = draft.questions[index];
+    const version = routeVersion; readDraft();
     app.querySelectorAll('#editor-form input, #editor-form textarea, #editor-form select, #editor-form button').forEach(el => el.disabled = true);
     try {
       if (file.size > 50 * 1024 * 1024) throw new Error('Choose an image no larger than 50 MB.');
@@ -109,16 +118,21 @@ function editor() {
       if (pixels > 30000000) throw new Error('Choose an image smaller than 30 megapixels.');
       const response = await fetch('/api/images', {method:'POST', headers:{'X-Quiz-Owner':ownerToken, 'Content-Type':file.type || 'application/octet-stream'}, body:file});
       const result = await response.json(); if (!response.ok) throw new Error(result.error);
-      if (version === routeVersion) q.image = result.image;
+      if (version === routeVersion) {
+        if (target === 'cover') draft.coverImage = result.image;
+        else draft.questions[target].image = result.image;
+      }
     } catch (error) { toast(error.message || 'This picture could not be read. Try a PNG or JPEG.'); }
     finally { uploading = false; if (version === routeVersion) editor(); }
   };
   app.querySelectorAll('[data-image]').forEach(input => input.onchange = () => uploadPicture(input.files[0], Number(input.dataset.image)));
+  app.querySelector('[data-cover-image]').onchange = event => uploadPicture(event.target.files[0], 'cover');
   // Listen in capture phase at the document: browser clipboard events are not
   // consistently targeted at buttons and other non-editable descendants.
-  document.addEventListener('paste', event => {
+  pasteUploadHandler = event => {
     const question = event.target.closest?.('.question-editor');
-    if (!question) return;
+    const cover = event.target.closest?.('.quiz-cover-editor');
+    if (!question && !cover) return;
     const files = [...(event.clipboardData?.files || [])];
     const items = [...(event.clipboardData?.items || [])];
     const itemFiles = items.filter(item => item.kind === 'file').map(item => {
@@ -137,8 +151,9 @@ function editor() {
       return; // Ordinary text paste in headings and answers remains unchanged.
     }
     event.preventDefault();
-    uploadPicture(file, [...app.querySelectorAll('.question-editor')].indexOf(question));
-  }, true);
+    uploadPicture(file, cover && !question ? 'cover' : [...app.querySelectorAll('.question-editor')].indexOf(question));
+  };
+  document.addEventListener('paste', pasteUploadHandler, true);
   document.querySelector('#editor-form').onsubmit = event => { event.preventDefault(); run(event.submitter, async () => {
     readDraft(); const version = routeVersion;
     await api(draft.id ? `/quizzes/${draft.id}` : '/quizzes', {method:draft.id ? 'PUT' : 'POST', body:draft});
@@ -160,7 +175,7 @@ async function connectRoom(role, pin, version) {
   timer = setInterval(updateTimer,250);
 }
 function leaderboard(players) {
-  return `<div class="ranking">${players.slice(0,10).map((p,i)=>`<div class="rank-row"><span class="position">${i+1}</span><strong>${escapeHTML(p.nickname)}${p.id===roomState.self?.id?' (you)':''}</strong><span class="score">${p.score.toLocaleString()} <small>pts</small></span></div>`).join('')}</div>`;
+  return `<div class="ranking">${players.slice(0,10).map((p,i)=>`<div class="rank-row"><span class="position">${i+1}</span><span class="player-emoji" aria-hidden="true">${escapeHTML(p.emoji || '😀')}</span><strong>${escapeHTML(p.nickname)}${p.id===roomState.self?.id?' (you)':''}</strong><span class="score">${p.score.toLocaleString()} <small>pts</small></span></div>`).join('')}</div>`;
 }
 function questionContent(s) {
   const q = s.question, host = s.host, preview = s.status === 'preview', reveal = s.status === 'reveal';
@@ -186,7 +201,7 @@ function renderRoom() {
   const bar = `<div class="room-bar"><span><b>PIN ${escapeHTML(s.pin)}</b> · ${escapeHTML(s.quizTitle)}</span><span class="connection">● Connected</span><button class="danger-link" id="leave-room">${host?'Leave host screen':'Leave game'}</button></div>`;
   let content;
   if (s.status==='lobby') {
-    content = host ? `<p class="eyebrow">Ready, set, quiz.</p><h1>Everyone in?</h1><p class="join-url">Join at <b>${escapeHTML(location.host)}</b> with game PIN</p><div class="pin-display"><small>GAME PIN</small><strong>${s.pin}</strong></div><div><button class="btn ghost" id="copy-link">Copy invite link ↗</button></div><p class="room-title">${s.players.length} ${s.players.length===1?'player':'players'} in the lobby</p><div class="player-list">${s.players.length?s.players.map(p=>`<span class="player-chip">${escapeHTML(p.nickname)}</span>`).join(''):'<p class="empty">The stage is set. Just waiting for your people…</p>'}</div><div class="lobby-actions"><button class="btn light" data-action="start" ${s.players.length?'':'disabled'}>Start game →</button></div>` : `<div class="podium-icon" aria-hidden="true">✦</div><p class="eyebrow">You're on the list</p><h1>You're in, ${escapeHTML(s.self.nickname)}!</h1><p class="subtitle">Get ready. Your host will start the game soon.</p><span class="spinner"></span><p class="muted-white">${s.players.length} ${s.players.length===1?'player':'players'} ready to play</p>`;
+    content = host ? `<p class="eyebrow">Ready, set, quiz.</p><h1>Everyone in?</h1><p class="join-url">Join at <b>${escapeHTML(location.host)}</b> with game PIN</p><div class="pin-display"><small>GAME PIN</small><strong>${s.pin}</strong></div><div><button class="btn ghost" id="copy-link">Copy invite link ↗</button></div><p class="room-title">${s.players.length} ${s.players.length===1?'player':'players'} in the lobby</p><div class="player-list">${s.players.length?s.players.map(p=>`<span class="player-chip"><span aria-hidden="true">${escapeHTML(p.emoji || '😀')}</span> ${escapeHTML(p.nickname)}</span>`).join(''):'<p class="empty">The stage is set. Just waiting for your people…</p>'}</div><div class="lobby-actions"><button class="btn light" data-action="start" ${s.players.length?'':'disabled'}>Start game →</button></div>` : `<div class="podium-icon" aria-hidden="true">✦</div><p class="eyebrow">You're on the list</p><h1>You're in, ${escapeHTML(s.self.emoji || '😀')} ${escapeHTML(s.self.nickname)}!</h1><p class="subtitle">Get ready. Your host will start the game soon.</p><span class="spinner"></span><p class="muted-white">${s.players.length} ${s.players.length===1?'player':'players'} ready to play</p>`;
   } else if (isQuestion || isReveal || s.status === 'preview') {
     content = questionContent(s);
   } else {
@@ -229,6 +244,7 @@ function updateTimer() {
 }
 async function route() {
   const version=++routeVersion;stream?.close();stream=null;clearInterval(timer);roomState=null;
+  if (pasteUploadHandler) { document.removeEventListener('paste', pasteUploadHandler, true); pasteUploadHandler = null; }
   const [page,arg,pin]=location.hash.slice(1).split('/');
   if ((['host','create','edit'].includes(page) || (page === 'room' && arg === 'host')) && location.pathname !== '/host') { location.replace(`/host${location.hash}`); return; }
   try {

@@ -4,7 +4,7 @@ import { mkdirSync, readFileSync, writeFileSync, renameSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { sampleQuiz, validateQuiz, normalizeAnswer, mediaPathPattern } from './lib/quiz.mjs';
+import { sampleQuiz, validateQuiz, normalizeAnswer, mediaPathPattern, playerEmojis } from './lib/quiz.mjs';
 
 const baseDir = path.dirname(fileURLToPath(import.meta.url));
 const secret = () => randomBytes(24).toString('base64url');
@@ -39,7 +39,7 @@ export function createApp({ dataDir = process.env.DATA_DIR || path.join(baseDir,
   const bearer = req => /^Bearer (.+)$/.exec(req.headers.authorization || '')?.[1] || req.headers['x-quiz-owner'];
   const owner = req => { const token = bearer(req); if (!token || token.length < 16 || token.length > 256) fail(401, 'A browser owner token is required.'); return ownerHash(token); };
   const publicQuiz = ({ owner: ignored, ...quiz }) => quiz;
-  const rank = room => [...room.players.values()].map(p => ({ id: p.id, nickname: p.nickname, score: p.score })).sort((a, b) => b.score - a.score || a.nickname.localeCompare(b.nickname)).map((p, i) => ({ ...p, rank: i + 1 }));
+  const rank = room => [...room.players.values()].map(p => ({ id: p.id, nickname: p.nickname, emoji: p.emoji, score: p.score })).sort((a, b) => b.score - a.score || a.nickname.localeCompare(b.nickname)).map((p, i) => ({ ...p, rank: i + 1 }));
   const identity = (room, token) => token && token === room.hostToken ? { host: true } : room.players.get(token);
   const state = (room, who) => {
     const question = room.quiz.questions[room.index];
@@ -58,7 +58,7 @@ export function createApp({ dataDir = process.env.DATA_DIR || path.join(baseDir,
       }
     }
     if (!who.host) {
-      result.self = { id: who.id, nickname: who.nickname, score: who.score, answered: who.answer !== undefined, ...(typeof who.answer === 'number' ? {answerIndex: who.answer} : {answerText: who.answer}) };
+      result.self = { id: who.id, nickname: who.nickname, emoji: who.emoji, score: who.score, answered: who.answer !== undefined, ...(typeof who.answer === 'number' ? {answerIndex: who.answer} : {answerText: who.answer}) };
       if (room.status === 'reveal' || room.status === 'finished') { result.self.correct = who.answer !== undefined && who.correct === true; result.self.points = who.points || 0; }
     }
     return result;
@@ -151,12 +151,13 @@ export function createApp({ dataDir = process.env.DATA_DIR || path.join(baseDir,
         if (req.method === 'POST' && action === 'join') {
           if (room.status !== 'lobby') fail(409, 'This game has already started.');
           if (room.players.size >= 100) fail(409, 'This game is full.');
-          const { nickname } = await body(req);
+          const { nickname, emoji = '😀' } = await body(req);
           if (room.status !== 'lobby') fail(409, 'This game has already started.');
           if (room.players.size >= 100) fail(409, 'This game is full.');
           if (typeof nickname !== 'string' || !nickname.trim() || nickname.trim().length > 24 || /[\u0000-\u001f\u007f]/.test(nickname)) fail(400, 'Choose a nickname of 1–24 characters.');
+          if (!playerEmojis.includes(emoji)) fail(400, 'Choose one of the available player emojis.');
           if ([...room.players.values()].some(p => p.nickname.toLowerCase() === nickname.trim().toLowerCase())) fail(409, 'That nickname is already taken.');
-          const playerToken = secret(); room.players.set(playerToken, { id: randomUUID(), nickname: nickname.trim(), score: 0 }); room.touchedAt = Date.now(); broadcast(room); return send(res, 201, { playerToken });
+          const playerToken = secret(); room.players.set(playerToken, { id: randomUUID(), nickname: nickname.trim(), emoji, score: 0 }); room.touchedAt = Date.now(); broadcast(room); return send(res, 201, { playerToken });
         }
         const who = identity(room, bearer(req) || req.headers['x-quiz-host-token'] || url.searchParams.get('token')); if (!who) fail(401, 'A valid game token is required.');
         room.touchedAt = Date.now();
