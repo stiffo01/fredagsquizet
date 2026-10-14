@@ -284,7 +284,7 @@ function questionContent(s) {
   const typed = q.type === 'type-answer', poll = q.type === 'poll';
   const image = `<figure class="question-picture"><img src="${escapeHTML(q.image || defaultPicture(q))}" alt="${escapeHTML(q.image ? q.imageAlt || 'Question picture' : 'Colourful quiz illustration')}"></figure>`;
   const heading = `<p class="eyebrow">${escapeHTML(questionTypes[q.type] || questionTypes.quiz)} · Question ${s.questionIndex + 1} of ${s.questionCount}</p><h1>${escapeHTML(q.question)}</h1>${image}`;
-  if (preview) return `${heading}<div class="preview-note"><span class="badge">TAKE A LOOK</span><p>Read the question and study the picture. Answers will open next.</p></div>${host ? '<button class="btn light" data-action="open">Open answers →</button>' : '<p class="muted-white">Waiting for the host to open answers…</p>'}`;
+  if (preview) return `${heading}<div class="preview-note"><span class="badge">TAKE A LOOK</span>${s.previewEndsAt ? '<div class="preview-countdown"><span>Answers in</span><strong id="preview-countdown">5</strong></div>' : '<p>Read the question and study the picture. Answers will open when the host is ready.</p>'}</div>${host && !s.previewEndsAt ? '<button class="btn light" data-action="open">Open answers →</button>' : ''}`;
   let controls;
   if (typed) {
     controls = reveal ? `<div class="feedback">Accepted answers: ${q.acceptedAnswers.map(escapeHTML).join(' · ')}</div>` : host ? '<p class="waiting-answer">Players are typing their answers…</p>' : s.self.answered ? '<p class="waiting-answer">Answer locked in. Fingers crossed!</p>' : `<form id="typed-answer-form" class="card typed-answer"><label class="field" for="typed-answer">Your answer</label><input class="input" id="typed-answer" data-question-index="${s.questionIndex}" maxlength="200" required autocomplete="off" placeholder="Type your answer…"><button class="btn primary wide" type="submit">Lock in answer →</button></form>`;
@@ -302,7 +302,9 @@ function renderRoom() {
   const url = `${location.origin}/#join/${s.pin}`;
   const bar = `<div class="room-bar"><span><b>PIN ${escapeHTML(s.pin)}</b> · ${escapeHTML(s.quizTitle)}</span><span class="connection">● Connected</span><button class="danger-link" id="leave-room">${host?'Leave host screen':'Leave game'}</button></div>`;
   let content;
-  if (s.status==='lobby') {
+  if (s.status==='countdown') {
+    content = `<div class="start-countdown"><p class="eyebrow">Get ready to play</p><strong id="start-countdown">10</strong><p>The quiz is about to begin!</p></div>`;
+  } else if (s.status==='lobby') {
     content = host ? `<p class="eyebrow">Ready, set, quiz.</p><h1>Everyone in?</h1><p class="join-url">Join at <b>${escapeHTML(location.host)}</b> with game PIN</p><div class="pin-display"><small>GAME PIN</small><strong>${s.pin}</strong></div><div class="qr-invite"><img src="/api/rooms/${s.pin}/qr" alt="QR code to join game PIN ${s.pin}" width="240" height="240"><p>Scan to join</p></div><div><button class="btn ghost" id="copy-link">Copy invite link ↗</button></div><p class="room-title">${s.players.length} ${s.players.length===1?'player':'players'} in the lobby</p><div class="player-list">${s.players.length?s.players.map(p=>`<span class="player-chip"><span aria-hidden="true">${escapeHTML(p.emoji || '😀')}</span> ${escapeHTML(p.nickname)}</span>`).join(''):'<p class="empty">The stage is set. Just waiting for your people…</p>'}</div><div class="lobby-actions"><button class="btn light" data-action="start" ${s.players.length?'':'disabled'}>Start game →</button></div>` : `<div class="podium-icon" aria-hidden="true">✦</div><p class="eyebrow">You're on the list</p><h1>You're in, ${escapeHTML(s.self.emoji || '😀')} ${escapeHTML(s.self.nickname)}!</h1><p class="subtitle">Get ready. Your host will start the game soon.</p><span class="spinner"></span><p class="muted-white">${s.players.length} ${s.players.length===1?'player':'players'} ready to play</p>`;
   } else if (isQuestion || isReveal || s.status === 'preview') {
     content = questionContent(s);
@@ -339,7 +341,19 @@ function renderRoom() {
   updateTimer();
 }
 function updateTimer() {
-  if(roomState?.status!=='question')return;
+  if(!roomState)return;
+  const updateCountdown = (element, deadline) => {
+    if(!element)return;
+    const next = String(Math.max(1, Math.ceil((deadline-Date.now())/1000)));
+    if(element.textContent===next)return;
+    element.textContent=next;
+    element.classList.remove('countdown-tick');
+    void element.offsetWidth;
+    element.classList.add('countdown-tick');
+  };
+  if(roomState.status==='countdown') { updateCountdown(document.querySelector('#start-countdown'),roomState.countdownEndsAt); return; }
+  if(roomState.status==='preview'&&roomState.previewEndsAt) updateCountdown(document.querySelector('#preview-countdown'),roomState.previewEndsAt);
+  if(roomState.status!=='question')return;
   const remaining=Math.max(0,roomState.question.deadline-Date.now());
   const el=document.querySelector('#timer');if(el)el.textContent=Math.ceil(remaining/1000);
   const progress=document.querySelector('#time-progress');if(progress)progress.style.width=`${remaining/(roomState.question.timeLimit*1000)*100}%`;

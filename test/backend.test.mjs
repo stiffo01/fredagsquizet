@@ -7,13 +7,13 @@ import http from 'node:http';
 import { createApp } from '../server.mjs';
 
 const quiz = { title: 'Integration quiz', questions: [{ question: 'Two plus two?', answers: ['Four', 'Five'], correctIndex: 0, timeLimit: 10 }, { question: 'Blue or green?', answers: ['Blue', 'Green'], correctIndex: 1, timeLimit: 1 }] };
-async function fixture(t) {
+async function fixture(t, timing = {}) {
   const dataDir = await mkdtemp(path.join(tmpdir(), 'quiz-test-'));
   let app;
-  const boot = async () => { app = createApp({ dataDir }); await new Promise(resolve => app.server.listen(0, '127.0.0.1', resolve)); return `http://127.0.0.1:${app.server.address().port}`; };
+  const boot = async () => { app = createApp({ dataDir, hostUsername: 'test-host', hostPassword: 'test-password', startCountdownMs: 0, firstPreviewMs: 60_000, ...timing }); await new Promise(resolve => app.server.listen(0, '127.0.0.1', resolve)); return `http://127.0.0.1:${app.server.address().port}`; };
   let base = await boot();
   t.after(async () => { await app.close(); await rm(dataDir, { recursive: true, force: true }); });
-  const request = async (url, { method = 'GET', token, body } = {}) => { const res = await fetch(base + url, { method, headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}), 'Content-Type': 'application/json' }, body: body === undefined ? undefined : JSON.stringify(body) }); return { status: res.status, data: await res.json() }; };
+  const request = async (url, { method = 'GET', token, body } = {}) => { const res = await fetch(base + url, { method, headers: { Authorization: `Basic ${Buffer.from('test-host:test-password').toString('base64')}`, ...(token ? { 'X-Quiz-Host-Token': token, 'X-Quiz-Owner': token } : {}), 'Content-Type': 'application/json' }, body: body === undefined ? undefined : JSON.stringify(body) }); return { status: res.status, data: await res.json() }; };
   return { request, get base() { return base; }, restart: async () => { await app.close(); base = await boot(); } };
 }
 
@@ -34,6 +34,32 @@ test('a live room provides a scannable player-join QR image', async t => {
   assert.deepEqual([...png.subarray(0, 8)], [137, 80, 78, 71, 13, 10, 26, 10]);
   assert.equal(png.readUInt32BE(16), 240);
   assert.equal(png.readUInt32BE(20), 240);
+});
+
+test('starting a quiz counts down, previews the first question, then opens answers automatically', async t => {
+  const f = await fixture(t, { startCountdownMs: 100, firstPreviewMs: 120 });
+  const room = (await f.request('/api/rooms', { method: 'POST', body: { quiz } })).data;
+  const route = `/api/rooms/${room.pin}`;
+  const player = (await f.request(`${route}/join`, { method: 'POST', body: { nickname: 'Ready' } })).data.playerToken;
+  const starting = (await f.request(`${route}/start`, { method: 'POST', token: room.hostToken })).data;
+  assert.equal(starting.status, 'countdown');
+  assert.equal(starting.question, undefined);
+  const state = async token => (await f.request(`${route}/state`, { token })).data;
+  const waitFor = async (token, status) => {
+    const until = Date.now() + 1000;
+    while (Date.now() < until) {
+      const value = await state(token);
+      if (value.status === status) return value;
+      await new Promise(resolve => setTimeout(resolve, 10));
+    }
+    throw new Error(`Room did not reach ${status}.`);
+  };
+  const preview = await waitFor(player, 'preview');
+  assert.equal(preview.question.question, quiz.questions[0].question);
+  assert.equal(preview.question.answers, undefined);
+  assert.ok(preview.previewEndsAt > Date.now());
+  const question = await waitFor(player, 'question');
+  assert.deepEqual(question.question.answers, quiz.questions[0].answers);
 });
 
 test('multiplayer flow enforces authorization, secrecy, one answer, scoring and final ranking', async t => {
@@ -103,15 +129,15 @@ test('saved quizzes survive restart and remain scoped to the browser owner', asy
   assert.equal((await f.request('/api/quizzes', { method: 'POST', token, body: { title: 'Bad', questions: [] } })).status, 400);
   const saved = (await f.request('/api/quizzes', { method: 'POST', token, body: quiz })).data;
   await f.restart();
-  assert.equal((await f.request('/api/quizzes', { token })).data.length, 2);
-  assert.equal((await f.request('/api/quizzes', { token: other })).data.length, 1);
-  assert.equal((await f.request(`/api/quizzes/${saved.id}`, { method: 'DELETE', token: other })).status, 404);
-  assert.equal((await f.request('/api/rooms', { method: 'POST', token: other, body: { quizId: saved.id } })).status, 404);
+  assert.equal((await f.request('/api/quizzes', { token })).data.length, 3);
+  assert.equal((await f.request('/api/quizzes', { token: other })).data.length, 3);
+  assert.equal((await f.request(`/api/quizzes/${saved.id}`, { token: other })).status, 200, 'the shared quiz is visible to every host');
+  assert.equal((await f.request('/api/rooms', { method: 'POST', token: other, body: { quizId: saved.id } })).status, 201, 'every host can run a shared quiz');
   assert.equal((await f.request('/api/rooms', { method: 'POST', token, body: { quizId: saved.id } })).status, 201);
   const edited = await f.request(`/api/quizzes/${saved.id}`, { method: 'PUT', token, body: { ...quiz, title: 'Renamed' } });
   assert.equal(edited.data.title, 'Renamed');
   assert.equal((await f.request(`/api/quizzes/${saved.id}`, { method: 'DELETE', token })).status, 200);
-  await f.restart(); assert.equal((await f.request('/api/quizzes', { token })).data.length, 1);
+  await f.restart(); assert.equal((await f.request('/api/quizzes', { token })).data.length, 2);
 });
 
 test('SSE sends authorized state and reconnects using the same player token', async t => {
@@ -187,10 +213,10 @@ test('mixed question types validate, preserve preview secrecy, and score typed a
 test('uploaded images are bounded, saved with quizzes, served safely, and survive restart', async t => {
   const f = await fixture(t), token='image-owner-long-enough';
   const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGP4z8AAAAMBAQDJ/pLvAAAAAElFTkSuQmCC', 'base64');
-  const upload = (body,auth=token) => fetch(`${f.base}/api/images`,{method:'POST',headers:auth?{Authorization:`Bearer ${auth}`}:{},body});
+  const upload = (body,auth=token) => fetch(`${f.base}/api/images`,{method:'POST',headers:{Authorization:`Basic ${Buffer.from('test-host:test-password').toString('base64')}`,...(auth?{'X-Quiz-Owner':auth}:{})},body});
   assert.equal((await upload(png,null)).status,401);
   assert.equal((await upload('<svg onload="alert(1)"></svg>')).status,400);
-  assert.equal((await upload(Buffer.alloc(5*1024*1024+1))).status,413);
+  assert.equal((await upload(Buffer.alloc(50*1024*1024+1))).status,413);
   const uploaded = await upload(png);assert.equal(uploaded.status,201);const {image} = await uploaded.json();
   const saved = (await f.request('/api/quizzes',{method:'POST',token,body:{title:'Image quiz',questions:[{...quiz.questions[0],image,imageAlt:'A test pixel'}]}})).data;
   await f.restart();

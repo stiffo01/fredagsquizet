@@ -66,7 +66,7 @@ function storeImage(image, mediaDir) {
   return { image: `/media/${filename}` };
 }
 
-export function createApp({ dataDir = process.env.DATA_DIR || path.join(baseDir, 'data'), publicDir = path.join(baseDir, 'public'), roomTtlMs = 6 * 60 * 60 * 1000, hostUsername = process.env.HOST_USERNAME, hostPassword = process.env.HOST_PASSWORD } = {}) {
+export function createApp({ dataDir = process.env.DATA_DIR || path.join(baseDir, 'data'), publicDir = path.join(baseDir, 'public'), roomTtlMs = 6 * 60 * 60 * 1000, startCountdownMs = 10_000, firstPreviewMs = 5_000, hostUsername = process.env.HOST_USERNAME, hostPassword = process.env.HOST_PASSWORD } = {}) {
   if (!hostUsername || !hostPassword) throw new Error('Set HOST_USERNAME and HOST_PASSWORD before starting Fredagsquizet.');
   const equalSecret = (provided, expected) => timingSafeEqual(createHash('sha256').update(provided).digest(), createHash('sha256').update(expected).digest());
   const authorizeHost = req => {
@@ -99,7 +99,8 @@ export function createApp({ dataDir = process.env.DATA_DIR || path.join(baseDir,
   const state = (room, who) => {
     const question = room.quiz.questions[room.index];
     const result = { pin: room.pin, status: room.status, quizTitle: room.quiz.title, hasScoredQuestions: room.quiz.questions.some(q => q.type !== 'poll'), questionIndex: room.index, questionCount: room.quiz.questions.length, players: rank(room), leaderboard: rank(room), answeredCount: [...room.players.values()].filter(p => p.answer !== undefined).length, host: !!who.host };
-    if (question && room.status !== 'lobby') {
+    if (room.status === 'countdown') result.countdownEndsAt = room.countdownEndsAt;
+    if (question && ['preview', 'question', 'reveal', 'finished'].includes(room.status)) {
       result.question = { type: question.type ?? 'quiz', question: question.question, image: question.image || '', imageAlt: question.imageAlt || '', timeLimit: question.timeLimit };
       if (room.status !== 'preview') {
         result.question.answers = question.answers;
@@ -112,6 +113,7 @@ export function createApp({ dataDir = process.env.DATA_DIR || path.join(baseDir,
         result.answerCounts = question.answers?.map((_, i) => [...room.players.values()].filter(p => p.answer === i).length);
       }
     }
+    if (room.status === 'preview' && room.previewEndsAt) result.previewEndsAt = room.previewEndsAt;
     if (!who.host) {
       result.self = { id: who.id, nickname: who.nickname, emoji: who.emoji, score: who.score, answered: who.answer !== undefined, ...(typeof who.answer === 'number' ? {answerIndex: who.answer} : {answerText: who.answer}) };
       if (room.status === 'reveal' || room.status === 'finished') { result.self.correct = who.answer !== undefined && who.correct === true; result.self.points = who.points || 0; }
@@ -120,14 +122,35 @@ export function createApp({ dataDir = process.env.DATA_DIR || path.join(baseDir,
   };
   const broadcast = room => { for (const client of room.clients) client.res.write(`event: state\ndata: ${JSON.stringify(state(room, client.who))}\n\n`); };
   const reveal = room => { if (room.status !== 'question') return; clearTimeout(room.timer); for (const p of room.players.values()) p.score += p.points || 0; room.status = 'reveal'; broadcast(room); };
+  const showPreview = (room, automatic = false) => {
+    clearTimeout(room.timer);
+    room.status = 'preview'; room.startedAt = undefined; room.deadline = undefined;
+    room.previewEndsAt = automatic ? Date.now() + firstPreviewMs : undefined;
+    broadcast(room);
+    if (automatic) {
+      room.timer = setTimeout(() => { if (room.status === 'preview' && room.previewEndsAt) openAnswers(room); }, firstPreviewMs);
+      room.timer.unref();
+    }
+  };
+  const beginCountdown = room => {
+    room.index = 0;
+    if (startCountdownMs === 0) { showPreview(room, true); return; }
+    room.countdownEndsAt = Date.now() + startCountdownMs;
+    room.status = 'countdown';
+    broadcast(room);
+    room.timer = setTimeout(() => { if (room.status === 'countdown') showPreview(room, true); }, startCountdownMs);
+    room.timer.unref();
+  };
   const advance = room => {
     clearTimeout(room.timer);
+    room.previewEndsAt = undefined;
     room.index++;
     if (room.index >= room.quiz.questions.length) { room.index = room.quiz.questions.length - 1; room.status = 'finished'; broadcast(room); return; }
     for (const p of room.players.values()) { p.answer = undefined; p.points = 0; p.correct = false; }
-    room.status = 'preview'; room.startedAt = undefined; room.deadline = undefined; broadcast(room);
+    showPreview(room);
   };
   const openAnswers = room => {
+    clearTimeout(room.timer); room.previewEndsAt = undefined;
     room.status = 'question'; room.startedAt = Date.now(); room.deadline = room.startedAt + room.quiz.questions[room.index].timeLimit * 1000;
     room.timer = setTimeout(() => reveal(room), room.deadline - Date.now()); room.timer.unref(); broadcast(room);
   };
@@ -259,7 +282,7 @@ export function createApp({ dataDir = process.env.DATA_DIR || path.join(baseDir,
         if (req.method === 'POST' && ['start', 'open', 'next', 'end'].includes(action)) {
           authorizeHost(req);
           if (!who.host) fail(403, 'Only the host can control the game.');
-          if (action === 'start') { if (room.status !== 'lobby') fail(409, 'Game already started.'); if (!room.players.size) fail(409, 'Wait for at least one player.'); advance(room); }
+          if (action === 'start') { if (room.status !== 'lobby') fail(409, 'Game already started.'); if (!room.players.size) fail(409, 'Wait for at least one player.'); beginCountdown(room); }
           if (action === 'open') { if (room.status !== 'preview') fail(409, 'The question is not in preview.'); openAnswers(room); }
           if (action === 'next') { if (room.status === 'question') reveal(room); else if (room.status === 'reveal') advance(room); else fail(409, 'No next question available.'); }
           if (action === 'end') { if (room.status === 'question') reveal(room); clearTimeout(room.timer); room.status = 'finished'; broadcast(room); }
