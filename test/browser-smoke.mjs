@@ -80,6 +80,7 @@ try {
   await host.wait('!!document.querySelector("[data-host]:not([data-host=sample])")');
   await host.click('[data-host]:not([data-host=sample])');
   await host.wait('!!document.querySelector(".pin-display strong")');
+  await host.wait('document.querySelector(".qr-invite img")?.naturalWidth > 0');
   const pin=await host.evaluate('document.querySelector(".pin-display strong").textContent');
   async function join(name) {
     const p=await page(`#join/${pin}`);

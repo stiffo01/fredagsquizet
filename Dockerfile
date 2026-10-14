@@ -5,6 +5,8 @@ ENV NODE_ENV=production \
     DATA_DIR=/app/data
 
 WORKDIR /app
+COPY package.json package-lock.json ./
+RUN npm ci --omit=dev
 COPY --chown=node:node . .
 RUN mkdir -p /app/data && chown node:node /app/data
 

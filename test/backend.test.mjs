@@ -17,6 +17,25 @@ async function fixture(t) {
   return { request, get base() { return base; }, restart: async () => { await app.close(); base = await boot(); } };
 }
 
+test('a live room provides a scannable player-join QR image', async t => {
+  const dataDir = await mkdtemp(path.join(tmpdir(), 'quiz-qr-test-'));
+  const app = createApp({ dataDir, hostUsername: 'test-host', hostPassword: 'test-password' });
+  await new Promise(resolve => app.server.listen(0, '127.0.0.1', resolve));
+  t.after(async () => { await app.close(); await rm(dataDir, { recursive: true, force: true }); });
+  const base = `http://127.0.0.1:${app.server.address().port}`;
+  const roomResponse = await fetch(`${base}/api/rooms`, { method: 'POST', headers: { Authorization: `Basic ${Buffer.from('test-host:test-password').toString('base64')}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ quiz }) });
+  const room = await roomResponse.json();
+  assert.equal(roomResponse.status, 201);
+  const response = await fetch(`${base}/api/rooms/${room.pin}/qr`, { headers: { 'x-forwarded-host': 'quiz.example.test', 'x-forwarded-proto': 'https' } });
+  assert.equal(response.status, 200);
+  assert.match(response.headers.get('content-type'), /^image\/png/);
+  assert.equal(response.headers.get('cache-control'), 'no-store');
+  const png = Buffer.from(await response.arrayBuffer());
+  assert.deepEqual([...png.subarray(0, 8)], [137, 80, 78, 71, 13, 10, 26, 10]);
+  assert.equal(png.readUInt32BE(16), 240);
+  assert.equal(png.readUInt32BE(20), 240);
+});
+
 test('multiplayer flow enforces authorization, secrecy, one answer, scoring and final ranking', async t => {
   const { request } = await fixture(t);
   const room = (await request('/api/rooms', { method: 'POST', body: { quiz } })).data;

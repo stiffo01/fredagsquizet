@@ -7,6 +7,7 @@ import { mkdirSync, readFileSync, writeFileSync, renameSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import QRCode from 'qrcode';
 import { sampleQuiz, featureTestQuiz, validateQuiz, normalizeAnswer, mediaPathPattern, playerEmojis } from './lib/quiz.mjs';
 
 const baseDir = path.dirname(fileURLToPath(import.meta.url));
@@ -143,6 +144,18 @@ export function createApp({ dataDir = process.env.DATA_DIR || path.join(baseDir,
       const url = new URL(req.url, 'http://localhost');
       const parts = url.pathname.split('/').filter(Boolean);
       if (req.method === 'GET' && url.pathname === '/api/health') return send(res, 200, { ok: true });
+      if (req.method === 'GET' && parts[0] === 'api' && parts[1] === 'rooms' && parts[3] === 'qr' && parts.length === 4) {
+        const pin = parts[2];
+        if (!/^\d{6}$/.test(pin)) fail(404, 'Game not found.');
+        if (!rooms.has(pin)) fail(404, 'Game not found.');
+        const host = String(req.headers['x-forwarded-host'] || req.headers.host || '').split(',')[0].trim();
+        if (!host || host.length > 255 || /[\s/\\]/.test(host)) fail(400, 'Could not determine the game address.');
+        const forwardedProto = String(req.headers['x-forwarded-proto'] || '').split(',')[0].trim().toLowerCase();
+        const protocol = forwardedProto === 'https' || req.socket.encrypted ? 'https' : 'http';
+        const image = await QRCode.toBuffer(`${protocol}://${host}/#join/${pin}`, { errorCorrectionLevel: 'M', margin: 2, width: 240 });
+        res.writeHead(200, { 'Content-Type': 'image/png', 'Cache-Control': 'no-store', 'Content-Security-Policy': "default-src 'none'" });
+        return res.end(image);
+      }
       if (req.method === 'POST' && url.pathname === '/api/images') {
         authorizeHost(req);
         owner(req);

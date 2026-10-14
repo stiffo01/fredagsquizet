@@ -11,5 +11,8 @@
     "start": "node server.mjs",
     "test": "node --test test/backend.test.mjs",
     "test:browser": "node test/browser-smoke.mjs"
+  },
+  "dependencies": {
+    "qrcode": "^1.5.4"
   }
 }
