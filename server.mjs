@@ -228,6 +228,16 @@ export function createApp({ dataDir = process.env.DATA_DIR || path.join(baseDir,
         if (req.method === 'DELETE') { persist(saved.filter(q => q !== existing)); return send(res, 200, { ok: true }); }
       }
       if (parts[0] === 'api' && parts[1] === 'rooms') {
+        if (req.method === 'GET' && parts.length === 2) {
+          authorizeHost(req);
+          const games = [...rooms.values()].sort((a, b) => b.touchedAt - a.touchedAt).map(room => ({
+            pin: room.pin, quizTitle: room.quiz.title, status: room.status, playerCount: room.players.size,
+            scoreboardAvailable: room.status === 'finished' && room.quiz.questions.some(q => q.type !== 'poll') && !room.scoreboardDeleted,
+            scoreboardVisible: room.scoreboardVisible === true, scoreboardDeleted: room.scoreboardDeleted === true,
+            leaderboard: room.status === 'finished' && !room.scoreboardDeleted ? rank(room) : [], hostToken: room.hostToken,
+          }));
+          return send(res, 200, games);
+        }
         if (req.method === 'POST' && parts.length === 2) {
           authorizeHost(req);
           if (rooms.size >= 1000) fail(503, 'Room limit reached. Try again later.');

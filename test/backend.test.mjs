@@ -36,6 +36,22 @@ test('a live room provides a scannable player-join QR image', async t => {
   assert.equal(png.readUInt32BE(20), 240);
 });
 
+test('host game manager lists active quizzes, exposes final scoreboards, and can stop or clear rooms', async t => {
+  const f = await fixture(t);
+  const room = (await f.request('/api/rooms',{method:'POST',body:{quiz}})).data;
+  const unauthenticated = await fetch(`${f.base}/api/rooms`);
+  assert.equal(unauthenticated.status,401,'game management requires host basic auth');
+  let games = (await f.request('/api/rooms')).data;
+  assert.equal(games.length,1);assert.equal(games[0].quizTitle,quiz.title);assert.equal(games[0].status,'lobby');
+  assert.equal(games[0].scoreboardAvailable,false);
+  await f.request(`/api/rooms/${room.pin}/end`,{method:'POST',token:room.hostToken});
+  games = (await f.request('/api/rooms')).data;
+  assert.equal(games[0].status,'finished');assert.equal(games[0].scoreboardAvailable,true);
+  await f.request(`/api/rooms/${room.pin}/clear-scoreboard`,{method:'POST',token:games[0].hostToken});
+  games = (await f.request('/api/rooms')).data;
+  assert.equal(games[0].scoreboardAvailable,false);assert.equal(games[0].scoreboardDeleted,true);
+});
+
 test('starting a quiz counts down, previews the first question, then opens answers automatically', async t => {
   const f = await fixture(t, { startCountdownMs: 100, firstPreviewMs: 120 });
   const viewQuiz = { ...quiz, questions: quiz.questions.map(question => ({ ...question, answers: ['Four', 'Five', 'Six', 'Seven'] })) };
