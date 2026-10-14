@@ -7,7 +7,7 @@ import { mkdirSync, readFileSync, writeFileSync, renameSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { sampleQuiz, validateQuiz, normalizeAnswer, mediaPathPattern, playerEmojis } from './lib/quiz.mjs';
+import { sampleQuiz, featureTestQuiz, validateQuiz, normalizeAnswer, mediaPathPattern, playerEmojis } from './lib/quiz.mjs';
 
 const baseDir = path.dirname(fileURLToPath(import.meta.url));
 const secret = () => randomBytes(24).toString('base64url');
@@ -174,12 +174,14 @@ export function createApp({ dataDir = process.env.DATA_DIR || path.join(baseDir,
         const id = parts[2];
         if (req.method === 'GET') {
           const hash = bearer(req) ? owner(req) : null;
-          const quizzes = [sampleQuiz, ...saved.filter(q => q.owner === hash).map(publicQuiz)];
+          const hiddenSample = hash && saved.some(q => q.owner === hash && q.hiddenSample);
+          const quizzes = [...(hiddenSample ? [] : [sampleQuiz]), featureTestQuiz, ...saved.filter(q => q.owner === hash && !q.hiddenSample).map(publicQuiz)];
           if (id) { const quiz = quizzes.find(q => q.id === id); if (!quiz) fail(404, 'Quiz not found.'); return send(res, 200, quiz); }
           return send(res, 200, quizzes);
         }
         const hash = owner(req);
-        if (req.method === 'POST' && !id) { if (saved.filter(q => q.owner === hash).length >= 100) fail(409, 'Quiz library limit reached.'); const quiz = validateQuiz(await body(req)); persist([...saved, { ...quiz, owner: hash }]); return send(res, 201, quiz); }
+        if (req.method === 'DELETE' && id === 'sample') { persist([...saved.filter(q => q.owner !== hash || !q.hiddenSample), { owner: hash, hiddenSample: true }]); return send(res, 200, { ok: true }); }
+        if (req.method === 'POST' && !id) { if (saved.filter(q => q.owner === hash && !q.hiddenSample).length >= 100) fail(409, 'Quiz library limit reached.'); const quiz = validateQuiz(await body(req)); persist([...saved, { ...quiz, owner: hash }]); return send(res, 201, quiz); }
         const existing = saved.find(q => q.id === id && q.owner === hash);
         if (!existing) fail(404, 'Quiz not found.');
         if (req.method === 'PUT') { const quiz = validateQuiz(await body(req), id); persist(saved.map(q => q === existing ? { ...quiz, owner: hash } : q)); return send(res, 200, quiz); }
@@ -193,6 +195,7 @@ export function createApp({ dataDir = process.env.DATA_DIR || path.join(baseDir,
           let quiz;
           if (input.quiz) quiz = validateQuiz(input.quiz);
           else if (!input.quizId || input.quizId === 'sample') quiz = sampleQuiz;
+          else if (input.quizId === 'feature-test') quiz = featureTestQuiz;
           else { const token = bearer(req) || input.ownerToken; quiz = saved.find(q => q.id === input.quizId && token && q.owner === ownerHash(token)); }
           if (!quiz) fail(404, 'Quiz not found.');
           let pin; do { pin = String(randomInt(100000, 1000000)); } while (rooms.has(pin));

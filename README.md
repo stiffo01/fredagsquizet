@@ -19,10 +19,12 @@ The browser's Basic Auth prompt is convenient on a trusted LAN. HTTP does not en
 
 Open **http://localhost:8095** on the server machine. For a shared game, the host and players should open **http://SERVER_LAN_IP:8095** on the same network; allow inbound TCP port 8095 through the server firewall if necessary. A phone's `localhost` refers to that phone, so use the server's LAN address on other devices.
 
-1. Open the host area at `/host` and sign in with the configured Basic Auth credentials. Choose the included quiz or create a quiz.
+1. Open the host area at `/host` and sign in with the configured Basic Auth credentials. Host the shared Feature test quiz to try the game, or create a quiz.
 2. Host the quiz and share its six-digit PIN.
 3. Players open the same site, enter the PIN, and choose a nickname and emoji.
 4. Start after players join, then advance through the results and questions.
+
+The built-in Feature test quiz is available to every host and demonstrates question previews, default artwork, true/false, typed answers, polls, and scoring. The Curiosity quiz can be removed from each host's library independently.
 
 The default binding is all network interfaces so players can join over LAN. Set `QUIZ_BIND=127.0.0.1` for access only from this computer. This app is intended for trusted local networks; use a TLS reverse proxy and appropriate access controls before any Internet deployment.
 
