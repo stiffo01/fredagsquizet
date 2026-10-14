@@ -98,7 +98,7 @@ export function createApp({ dataDir = process.env.DATA_DIR || path.join(baseDir,
   const identity = (room, token) => token && token === room.hostToken ? { host: true } : room.players.get(token);
   const state = (room, who) => {
     const question = room.quiz.questions[room.index];
-    const result = { pin: room.pin, status: room.status, quizTitle: room.quiz.title, hasScoredQuestions: room.quiz.questions.some(q => q.type !== 'poll'), questionIndex: room.index, questionCount: room.quiz.questions.length, players: rank(room), leaderboard: rank(room), answeredCount: [...room.players.values()].filter(p => p.answer !== undefined).length, answerOnly: room.answerOnly === true, host: !!who.host };
+    const result = { pin: room.pin, status: room.status, quizTitle: room.quiz.title, hasScoredQuestions: room.quiz.questions.some(q => q.type !== 'poll'), questionIndex: room.index, questionCount: room.quiz.questions.length, players: rank(room), leaderboard: room.scoreboardDeleted ? [] : rank(room), answeredCount: [...room.players.values()].filter(p => p.answer !== undefined).length, answerOnly: room.answerOnly === true, scoreboardVisible: room.scoreboardVisible === true, scoreboardDeleted: room.scoreboardDeleted === true, host: !!who.host };
     if (room.status === 'countdown') result.countdownEndsAt = room.countdownEndsAt;
     if (question && ['preview', 'question', 'reveal', 'finished'].includes(room.status)) {
       result.question = { type: question.type ?? 'quiz', question: question.question, image: question.image || '', imageAlt: question.imageAlt || '', timeLimit: question.timeLimit };
@@ -146,7 +146,7 @@ export function createApp({ dataDir = process.env.DATA_DIR || path.join(baseDir,
     room.previewEndsAt = undefined;
     room.answerOnly = false;
     room.index++;
-    if (room.index >= room.quiz.questions.length) { room.index = room.quiz.questions.length - 1; room.status = 'finished'; broadcast(room); return; }
+    if (room.index >= room.quiz.questions.length) { room.index = room.quiz.questions.length - 1; room.status = 'finished'; room.scoreboardVisible = false; room.scoreboardDeleted = false; broadcast(room); return; }
     for (const p of room.players.values()) { p.answer = undefined; p.points = 0; p.correct = false; }
     showPreview(room);
   };
@@ -280,7 +280,7 @@ export function createApp({ dataDir = process.env.DATA_DIR || path.join(baseDir,
           if ([...room.players.values()].every(p => p.answer !== undefined)) reveal(room); else broadcast(room);
           return send(res, 200, { ok: true });
         }
-        if (req.method === 'POST' && ['start', 'open', 'next', 'end', 'toggle-view'].includes(action)) {
+        if (req.method === 'POST' && ['start', 'open', 'next', 'end', 'toggle-view', 'show-scoreboard', 'clear-scoreboard'].includes(action)) {
           authorizeHost(req);
           if (!who.host) fail(403, 'Only the host can control the game.');
           if (action === 'start') { if (room.status !== 'lobby') fail(409, 'Game already started.'); if (!room.players.size) fail(409, 'Wait for at least one player.'); beginCountdown(room); }
@@ -290,7 +290,16 @@ export function createApp({ dataDir = process.env.DATA_DIR || path.join(baseDir,
             if (room.status !== 'question' || room.quiz.questions[room.index].answers?.length !== 4) fail(409, 'The display can only be changed during a four-answer question.');
             room.answerOnly = !room.answerOnly; broadcast(room);
           }
-          if (action === 'end') { if (room.status === 'question') reveal(room); clearTimeout(room.timer); room.status = 'finished'; broadcast(room); }
+          if (action === 'show-scoreboard') {
+            if (room.status !== 'finished' || !room.quiz.questions.some(q => q.type !== 'poll') || room.scoreboardDeleted) fail(409, 'The final scoreboard is not available.');
+            room.scoreboardVisible = !room.scoreboardVisible; broadcast(room);
+          }
+          if (action === 'clear-scoreboard') {
+            if (room.status !== 'finished') fail(409, 'The scoreboard can only be cleared after the game.');
+            for (const player of room.players.values()) player.score = 0;
+            room.scoreboardDeleted = true; room.scoreboardVisible = false; broadcast(room);
+          }
+          if (action === 'end') { if (room.status === 'question') reveal(room); clearTimeout(room.timer); room.status = 'finished'; room.scoreboardVisible = false; room.scoreboardDeleted = false; broadcast(room); }
           return send(res, 200, state(room, who));
         }
         fail(404, 'Endpoint not found.');

@@ -293,7 +293,7 @@ function questionContent(s) {
   }
   const feedback = !host && reveal ? `<div class="feedback">${poll ? (s.self.answered ? 'Thanks for voting! No points in this round.' : 'Voting closed. No points in this round.') : s.self.correct ? `Correct! +${s.self.points} points` : s.self.answered ? 'Not this time. You’ve got the next one!' : 'Time’s up!'}</div>` : '';
   const showHeading = !s.answerOnly;
-  const meta = s.answerOnly ? '' : `<div class="question-meta"><div class="timer" aria-label="Seconds remaining" id="timer">${reveal ? '✓' : q.timeLimit}</div><div class="progress" aria-hidden="true"><div id="time-progress" style="width:${reveal ? 0 : 100}%"></div></div><span class="answer-count">${s.answeredCount} / ${s.players.length} ${poll ? 'voted' : 'answered'}</span></div>`;
+  const meta = s.answerOnly && !host ? '' : `<div class="question-meta"><div class="timer" aria-label="Seconds remaining" id="timer">${reveal ? '✓' : q.timeLimit}</div><div class="progress" aria-hidden="true"><div id="time-progress" style="width:${reveal ? 0 : 100}%"></div></div><span class="answer-count">${s.answeredCount} / ${s.players.length} ${poll ? 'voted' : 'answered'}</span></div>`;
   return `${showHeading ? heading : ''}${meta}${controls}${feedback}${reveal && !poll ? leaderboard(s.leaderboard) : ''}${host ? `<div class="lobby-actions"><button class="btn light" data-action="next">${!reveal ? (poll ? 'Show votes' : 'Reveal answers') : s.questionIndex + 1 === s.questionCount ? 'Show podium 🏆' : 'Next question →'}</button><button class="btn ghost" data-action="end">End game</button></div>` : reveal ? '<p class="muted-white">Waiting for the host…</p>' : ''}`;
 }
 function renderRoom() {
@@ -312,7 +312,9 @@ function renderRoom() {
   } else if (isQuestion || isReveal || s.status === 'preview') {
     content = questionContent(s);
   } else {
-    content = `<div class="podium-icon" aria-hidden="true">🏆</div><p class="eyebrow">That's a wrap</p><h1>${s.hasScoredQuestions && s.leaderboard.length?`${escapeHTML(s.leaderboard[0].nickname)} takes the crown!`:'Thanks for playing!'}</h1><p class="subtitle">${escapeHTML(s.quizTitle)}${s.self?` · Your score: ${s.self.score.toLocaleString()} points`:''}</p>${s.hasScoredQuestions ? leaderboard(s.leaderboard) : '<p class="muted-white">All votes are in. Thanks for sharing your thoughts.</p>'}<a class="btn light" href="${host?'#host':'#'}">${host?'Host another quiz':'Play again'} →</a>`;
+    const board = s.scoreboardDeleted ? '<p class="muted-white">The scoreboard has been cleared.</p>' : s.scoreboardVisible ? leaderboard(s.leaderboard) : '<p class="muted-white">The final scoreboard is ready when you are.</p>';
+    const scoreboardControls = host && s.hasScoredQuestions && !s.scoreboardDeleted ? `<div class="lobby-actions"><button class="btn light" data-action="show-scoreboard">${s.scoreboardVisible ? 'Hide scoreboard' : 'Show scoreboard'}</button><button class="btn ghost" data-action="clear-scoreboard">Delete scoreboard</button></div>` : '';
+    content = `<div class="podium-icon" aria-hidden="true">🏆</div><p class="eyebrow">That's a wrap</p><h1>${s.scoreboardVisible && s.leaderboard.length?`${escapeHTML(s.leaderboard[0].nickname)} takes the crown!`:'Thanks for playing!'}</h1><p class="subtitle">${escapeHTML(s.quizTitle)}${s.self?` · Your score: ${s.self.score.toLocaleString()} points`:''}</p>${s.hasScoredQuestions ? `${board}${scoreboardControls}` : '<p class="muted-white">All votes are in. Thanks for sharing your thoughts.</p>'}<a class="btn light" href="${host?'#host':'#'}">${host?'Host another quiz':'Play again'} →</a>`;
   }
   app.innerHTML = `<section class="room">${bar}${content}</section>`;
   const typedInput = document.querySelector('#typed-answer');
@@ -335,6 +337,7 @@ function renderRoom() {
   }));
   app.querySelectorAll('[data-action]').forEach(button=>button.onclick=()=>run(button,async()=>{
     if(button.dataset.action==='end'&&!confirm('End the game now and show final scores?'))return;
+    if(button.dataset.action==='clear-scoreboard'&&!confirm('Delete the final scoreboard and clear all player scores for this game? This cannot be undone.'))return;
     const result=await api(`/rooms/${s.pin}/${button.dataset.action}`,{method:'POST',token}); if(version !== routeVersion) return; roomState=result;renderRoom();
   }));
   app.querySelectorAll('[data-answer-index]').forEach(button=>button.onclick=()=>run(button,async()=>{

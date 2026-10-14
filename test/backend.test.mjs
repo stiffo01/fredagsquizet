@@ -103,6 +103,14 @@ test('multiplayer flow enforces authorization, secrecy, one answer, scoring and 
   assert.equal((await request(`${route}/answer`, { method: 'POST', token: alice, body: { answerIndex: 1, questionIndex: 1 } })).status, 409);
   state = (await request(`${route}/next`, { method: 'POST', token: room.hostToken })).data;
   assert.equal(state.status, 'finished'); assert.equal(state.leaderboard[0].nickname, 'Alice');
+  assert.equal(state.scoreboardVisible, false);
+  state = (await request(`${route}/show-scoreboard`, { method: 'POST', token: room.hostToken })).data;
+  assert.equal(state.scoreboardVisible, true);
+  assert.equal((await request(`${route}/state`, { token: alice })).data.scoreboardVisible, true, 'the final scoreboard is shared with players');
+  state = (await request(`${route}/clear-scoreboard`, { method: 'POST', token: room.hostToken })).data;
+  assert.equal(state.scoreboardDeleted, true);
+  assert.deepEqual(state.leaderboard, []);
+  assert.ok(state.players.every(player => player.score === 0));
 });
 
 test('a join whose body finishes after the host starts is rejected', async t => {
