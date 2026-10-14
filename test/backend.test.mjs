@@ -77,10 +77,9 @@ test('starting a quiz counts down, previews the first question, then opens answe
   assert.ok(preview.previewEndsAt > Date.now());
   const question = await waitFor(player, 'question');
   assert.deepEqual(question.question.answers, viewQuiz.questions[0].answers);
-  assert.equal(question.answerOnly, false);
-  assert.equal((await f.request(`${route}/toggle-view`, { method: 'POST', token: room.hostToken })).data.answerOnly, true);
-  assert.equal((await state(player)).answerOnly, true, 'the answer-only view is shared with players');
-  assert.equal((await f.request(`${route}/toggle-view`, { method: 'POST', token: room.hostToken })).data.answerOnly, false);
+  assert.equal(question.answerOnly, undefined, 'answer layout is a per-player preference');
+  assert.equal((await f.request(`${route}/toggle-view`, { method: 'POST', token: room.hostToken })).status, 404, 'there is no host-wide layout switch');
+  assert.equal((await state(player)).answerOnly, undefined, 'player layout changes are not shared with the room');
   await f.request(`${route}/next`, { method: 'POST', token: room.hostToken });
   await f.request(`${route}/next`, { method: 'POST', token: room.hostToken });
   const secondPreview = await waitFor(player, 'preview');
@@ -218,8 +217,7 @@ test('mixed question types validate, preserve preview secrecy, and score typed a
   state = (await host('open')).data;
   assert.deepEqual(state.question.answers,['True','False']);
   assert.equal((await host('open')).status,409,'opening twice must not restart the timer');
-  assert.equal((await host('toggle-view')).data.answerOnly,true,'the host can switch true/false question layouts too');
-  assert.equal((await host('toggle-view')).data.answerOnly,false);
+  assert.equal((await host('toggle-view')).status,404,'layout preference is a local player control');
   await answer(alice,{questionIndex:0,answerIndex:0});await answer(bob,{questionIndex:0,answerIndex:1});
   state = (await f.request(`${route}/state`,{token:alice})).data;
   assert.equal(state.status,'reveal');assert.equal(state.question.revealImage,'/media/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.png');

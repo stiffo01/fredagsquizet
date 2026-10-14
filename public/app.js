@@ -14,7 +14,7 @@ const escapeHTML = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'
 const randomToken = () => Array.from(crypto.getRandomValues(new Uint8Array(24)), b => b.toString(16).padStart(2, '0')).join('');
 let ownerToken = localStorage.getItem('quizpop-owner');
 if (!ownerToken) { ownerToken = randomToken(); localStorage.setItem('quizpop-owner', ownerToken); }
-let stream, roomState, session, timer, autosaveTimer, autosaveTask, autosavePending = false, quizzes = [], draft, routeVersion = 0;
+let stream, roomState, session, timer, autosaveTimer, autosaveTask, autosavePending = false, quizzes = [], draft, routeVersion = 0, playerAnswerOnly = false;
 const questionTypes = {'quiz':'Multiple choice', 'true-false':'True or false', 'type-answer':'Type an answer', 'poll':'Poll'};
 const playerEmojis = ['😀', '😎', '🤓', '🥳', '🐸', '🦊', '🐼', '🐙', '🦄', '🐧', '🐢', '🦖', '🍕', '🚀', '⭐', '👾'];
 const newQuestion = () => ({type:'quiz', question:'', image:'', imageAlt:'', revealImage:'', revealImageAlt:'', showRevealImage:false, answers:['','','',''], correctIndex:0, timeLimit:20});
@@ -303,6 +303,7 @@ async function connectRoom(role, pin, version) {
   const stored = sessionStorage.getItem(`quizpop-${role}-${pin}`);
   if (!stored) { location.href = role==='host'?'/host#host':`/#join/${pin}`; return; }
   session = JSON.parse(stored);
+  playerAnswerOnly = role === 'player' && sessionStorage.getItem(`quizpop-answer-view-${pin}`) === 'answers-only';
   roomState = await api(`/rooms/${pin}/state`,{token:session.token});
   if (version !== routeVersion) return;
   renderRoom();
@@ -333,6 +334,7 @@ function updateScoreboardReveal() {
 }
 function questionContent(s) {
   const q = s.question, host = s.host, preview = s.status === 'preview', reveal = s.status === 'reveal';
+  const answerOnly = !host && playerAnswerOnly && s.status === 'question';
   const typed = q.type === 'type-answer', poll = q.type === 'poll';
   const image = `<figure class="question-picture"><img src="${escapeHTML(q.image || defaultPicture(q))}" alt="${escapeHTML(q.image ? q.imageAlt || 'Question picture' : 'Colourful quiz illustration')}"></figure>`;
   const revealImage = reveal && q.revealImage ? `<figure class="question-picture explanation-picture"><figcaption>More context</figcaption><img src="${escapeHTML(q.revealImage)}" alt="${escapeHTML(q.revealImageAlt || 'Answer explanation picture')}"></figure>` : '';
@@ -345,9 +347,9 @@ function questionContent(s) {
     controls = `<div class="answers ${q.type === 'true-false' ? 'true-false' : ''}">${q.answers.map((answer, i) => `<button class="answer ${reveal && !poll ? (i === q.correctIndex ? 'correct' : 'dim') : ''} ${s.self?.answerIndex === i ? 'selected' : ''}" data-answer-index="${i}" ${host || reveal || s.self?.answered ? 'disabled' : ''}><span class="symbol" aria-hidden="true">${q.type === 'true-false' ? ['✓','✕'][i] : symbols[i]}</span><span>${escapeHTML(answer)}${reveal && !poll && i === q.correctIndex ? ' ✓' : ''}${reveal ? ` <small>(${s.answerCounts?.[i] ?? 0}${poll ? ' votes' : ''})</small>` : ''}</span></button>`).join('')}</div>${!host && !reveal && s.self.answered ? `<p class="waiting-answer">${poll ? 'Vote recorded. Waiting for everyone…' : 'Answer locked in. Fingers crossed!'}</p>` : ''}`;
   }
   const feedback = !host && reveal ? `<div class="feedback">${poll ? (s.self.answered ? 'Thanks for voting! No points in this round.' : 'Voting closed. No points in this round.') : s.self.correct ? `Correct! +${s.self.points} points` : s.self.answered ? 'Not this time. You’ve got the next one!' : 'Time’s up!'}</div>` : '';
-  const showHeading = !s.answerOnly;
-  const meta = s.answerOnly && !host ? '' : `<div class="question-meta"><div class="timer" aria-label="Seconds remaining" id="timer">${reveal ? '✓' : q.timeLimit}</div><div class="progress" aria-hidden="true"><div id="time-progress" style="width:${reveal ? 0 : 100}%"></div></div><span class="answer-count">${s.answeredCount} / ${s.players.length} ${poll ? 'voted' : 'answered'}</span></div>`;
-  const answerView = host && s.status === 'question' && q.answers?.length >= 2 ? `<div class="answer-view-control"><button class="btn ghost" data-action="toggle-view" aria-pressed="${s.answerOnly}">${s.answerOnly ? 'Show question + answers' : 'Show answers only'}</button></div>` : '';
+  const showHeading = !answerOnly;
+  const meta = answerOnly ? '' : `<div class="question-meta"><div class="timer" aria-label="Seconds remaining" id="timer">${reveal ? '✓' : q.timeLimit}</div><div class="progress" aria-hidden="true"><div id="time-progress" style="width:${reveal ? 0 : 100}%"></div></div><span class="answer-count">${s.answeredCount} / ${s.players.length} ${poll ? 'voted' : 'answered'}</span></div>`;
+  const answerView = !host && s.status === 'question' && q.answers?.length >= 2 ? `<div class="answer-view-control"><button class="btn ghost" data-toggle-answer-view aria-pressed="${answerOnly}">${answerOnly ? 'Show question + answers' : 'Show answers only'}</button></div>` : '';
   return `${showHeading ? heading : ''}${meta}${answerView}${controls}${feedback}${revealImage}${reveal && !poll ? leaderboard(s.leaderboard) : ''}${host ? `<div class="lobby-actions"><button class="btn light" data-action="next">${!reveal ? (poll ? 'Show votes' : 'Reveal answers') : s.questionIndex + 1 === s.questionCount ? 'Show podium 🏆' : 'Next question →'}</button><button class="btn ghost" data-action="end">End game</button></div>` : reveal ? '<p class="muted-white">Waiting for the host…</p>' : ''}`;
 }
 function renderRoom() {
@@ -394,6 +396,11 @@ function renderRoom() {
     if(button.dataset.action==='clear-scoreboard'&&!confirm('Delete the final scoreboard and clear all player scores for this game? This cannot be undone.'))return;
     const result=await api(`/rooms/${s.pin}/${button.dataset.action}`,{method:'POST',token}); if(version !== routeVersion) return; roomState=result;renderRoom();
   }));
+  app.querySelectorAll('[data-toggle-answer-view]').forEach(button=>button.onclick=()=>{
+    playerAnswerOnly = !playerAnswerOnly;
+    sessionStorage.setItem(`quizpop-answer-view-${s.pin}`, playerAnswerOnly ? 'answers-only' : 'question-and-answers');
+    renderRoom();
+  });
   app.querySelectorAll('[data-answer-index]').forEach(button=>button.onclick=()=>run(button,async()=>{
     app.querySelectorAll('[data-answer-index]').forEach(b=>b.disabled=true);
     await submitAnswer({answerIndex:Number(button.dataset.answerIndex)});

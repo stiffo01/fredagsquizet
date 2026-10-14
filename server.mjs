@@ -98,7 +98,7 @@ export function createApp({ dataDir = process.env.DATA_DIR || path.join(baseDir,
   const identity = (room, token) => token && token === room.hostToken ? { host: true } : room.players.get(token);
   const state = (room, who) => {
     const question = room.quiz.questions[room.index];
-    const result = { pin: room.pin, status: room.status, quizTitle: room.quiz.title, hasScoredQuestions: room.quiz.questions.some(q => q.type !== 'poll'), questionIndex: room.index, questionCount: room.quiz.questions.length, players: rank(room), leaderboard: room.scoreboardDeleted ? [] : rank(room), answeredCount: [...room.players.values()].filter(p => p.answer !== undefined).length, answerOnly: room.answerOnly === true, scoreboardVisible: room.scoreboardVisible === true, scoreboardDeleted: room.scoreboardDeleted === true, scoreboardShownAt: room.scoreboardVisible ? room.scoreboardShownAt : null, host: !!who.host };
+    const result = { pin: room.pin, status: room.status, quizTitle: room.quiz.title, hasScoredQuestions: room.quiz.questions.some(q => q.type !== 'poll'), questionIndex: room.index, questionCount: room.quiz.questions.length, players: rank(room), leaderboard: room.scoreboardDeleted ? [] : rank(room), answeredCount: [...room.players.values()].filter(p => p.answer !== undefined).length, scoreboardVisible: room.scoreboardVisible === true, scoreboardDeleted: room.scoreboardDeleted === true, scoreboardShownAt: room.scoreboardVisible ? room.scoreboardShownAt : null, host: !!who.host };
     if (room.status === 'countdown') result.countdownEndsAt = room.countdownEndsAt;
     if (question && ['preview', 'question', 'reveal', 'finished'].includes(room.status)) {
       result.question = { type: question.type ?? 'quiz', question: question.question, image: question.image || '', imageAlt: question.imageAlt || '', timeLimit: question.timeLimit };
@@ -125,7 +125,7 @@ export function createApp({ dataDir = process.env.DATA_DIR || path.join(baseDir,
     return result;
   };
   const broadcast = room => { for (const client of room.clients) client.res.write(`event: state\ndata: ${JSON.stringify(state(room, client.who))}\n\n`); };
-  const reveal = room => { if (room.status !== 'question') return; clearTimeout(room.timer); for (const p of room.players.values()) p.score += p.points || 0; room.status = 'reveal'; room.answerOnly = false; broadcast(room); };
+  const reveal = room => { if (room.status !== 'question') return; clearTimeout(room.timer); for (const p of room.players.values()) p.score += p.points || 0; room.status = 'reveal'; broadcast(room); };
   const showPreview = (room, automatic = false) => {
     clearTimeout(room.timer);
     room.status = 'preview'; room.startedAt = undefined; room.deadline = undefined;
@@ -148,7 +148,6 @@ export function createApp({ dataDir = process.env.DATA_DIR || path.join(baseDir,
   const advance = room => {
     clearTimeout(room.timer);
     room.previewEndsAt = undefined;
-    room.answerOnly = false;
     room.index++;
     if (room.index >= room.quiz.questions.length) { room.index = room.quiz.questions.length - 1; room.status = 'finished'; room.scoreboardVisible = false; room.scoreboardShownAt = undefined; room.scoreboardDeleted = false; broadcast(room); return; }
     for (const p of room.players.values()) { p.answer = undefined; p.points = 0; p.correct = false; }
@@ -295,16 +294,12 @@ export function createApp({ dataDir = process.env.DATA_DIR || path.join(baseDir,
           if ([...room.players.values()].every(p => p.answer !== undefined)) reveal(room); else broadcast(room);
           return send(res, 200, { ok: true });
         }
-        if (req.method === 'POST' && ['start', 'open', 'next', 'end', 'toggle-view', 'show-scoreboard', 'clear-scoreboard'].includes(action)) {
+        if (req.method === 'POST' && ['start', 'open', 'next', 'end', 'show-scoreboard', 'clear-scoreboard'].includes(action)) {
           authorizeHost(req);
           if (!who.host) fail(403, 'Only the host can control the game.');
           if (action === 'start') { if (room.status !== 'lobby') fail(409, 'Game already started.'); if (!room.players.size) fail(409, 'Wait for at least one player.'); beginCountdown(room); }
           if (action === 'open') { if (room.status !== 'preview') fail(409, 'The question is not in preview.'); openAnswers(room); }
           if (action === 'next') { if (room.status === 'question') reveal(room); else if (room.status === 'reveal') advance(room); else fail(409, 'No next question available.'); }
-          if (action === 'toggle-view') {
-            if (room.status !== 'question' || (room.quiz.questions[room.index].answers?.length ?? 0) < 2) fail(409, 'The display can only be changed during a multiple-choice question.');
-            room.answerOnly = !room.answerOnly; broadcast(room);
-          }
           if (action === 'show-scoreboard') {
             if (room.status !== 'finished' || !room.quiz.questions.some(q => q.type !== 'poll') || room.scoreboardDeleted) fail(409, 'The final scoreboard is not available.');
             room.scoreboardVisible = !room.scoreboardVisible;
