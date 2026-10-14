@@ -1,4 +1,7 @@
 import http from 'node:http';
+import https from 'node:https';
+import { lookup as dnsLookup } from 'node:dns/promises';
+import { isIP } from 'node:net';
 import { randomBytes, randomInt, randomUUID, createHash, timingSafeEqual } from 'node:crypto';
 import { mkdirSync, readFileSync, writeFileSync, renameSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
@@ -10,6 +13,57 @@ const baseDir = path.dirname(fileURLToPath(import.meta.url));
 const secret = () => randomBytes(24).toString('base64url');
 const fail = (status, message) => { throw Object.assign(new Error(message), { status }); };
 const ownerHash = token => createHash('sha256').update(token).digest('hex');
+const isPublicAddress = address => {
+  const family = isIP(address);
+  if (family === 4) {
+    const [a,b,c] = address.split('.').map(Number);
+    return !(a === 0 || a === 10 || a === 127 || a >= 224 || (a === 100 && b >= 64 && b <= 127) || (a === 169 && b === 254) || (a === 172 && b >= 16 && b <= 31) || (a === 192 && b === 168) || (a === 192 && b === 0 && (c === 0 || c === 2)) || (a === 192 && b === 88 && c === 99) || (a === 198 && (b === 18 || b === 19 || (b === 51 && c === 100))) || (a === 203 && b === 0 && c === 113));
+  }
+  if (family !== 6) return false;
+  const value = address.toLowerCase();
+  if (value.startsWith('::ffff:')) return isPublicAddress(value.slice(7));
+  const [firstGroup = '0', secondGroup = '0'] = value.split(':');
+  const first = Number.parseInt(firstGroup || '0', 16), second = Number.parseInt(secondGroup || '0', 16);
+  return first >= 0x2000 && first <= 0x3fff && first !== 0x2002 && !(first === 0x2001 && (second <= 0x01ff || second === 0x0db8));
+};
+async function fetchPublicImage(inputUrl) {
+  let url;
+  try { url = new URL(inputUrl); } catch { fail(400, 'Enter a valid image URL.'); }
+  if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password || !url.hostname || (url.port && !['80', '443'].includes(url.port))) fail(400, 'Use a public HTTP or HTTPS image URL.');
+  const hostname = url.hostname.replace(/^\[|\]$/g, '').toLowerCase();
+  if (hostname === 'localhost' || hostname.endsWith('.localhost') || hostname.endsWith('.local')) fail(400, 'Use a publicly accessible image URL.');
+  let addresses;
+  try { addresses = isIP(hostname) ? [{ address: hostname, family: isIP(hostname) }] : await dnsLookup(hostname, { all: true, verbatim: true }); }
+  catch { fail(400, 'The image URL host could not be reached.'); }
+  if (!addresses.length || addresses.some(entry => !isPublicAddress(entry.address))) fail(400, 'Use a publicly accessible image URL.');
+  const selected = addresses[0], requester = url.protocol === 'https:' ? https : http;
+  const response = await new Promise((resolve, reject) => {
+    const req = requester.get({
+      protocol: url.protocol, hostname, port: url.port || undefined,
+      path: `${url.pathname}${url.search}`, headers: { Accept: 'image/png,image/jpeg,image/webp,image/gif', 'Accept-Encoding': 'identity', 'User-Agent': 'Fredagsquizet/1.0' },
+      lookup: (_host, options, callback) => options?.all ? callback(null, [selected]) : callback(null, selected.address, selected.family),
+    }, resolve);
+    req.setTimeout(15000, () => req.destroy(new Error('The image host took too long to respond.')));
+    req.on('error', reject);
+  });
+  if (response.statusCode !== 200) { response.resume(); fail(400, response.statusCode >= 300 && response.statusCode < 400 ? 'Image URL redirects are not supported. Use the final image URL.' : 'The image URL did not return an image.'); }
+  const declared = Number(response.headers['content-length'] || 0);
+  if (declared > 50 * 1024 * 1024) { response.destroy(); fail(413, 'Images must be 50 MB or smaller.'); }
+  const chunks = []; let bytes = 0;
+  for await (const chunk of response) { bytes += chunk.length; if (bytes > 50 * 1024 * 1024) { response.destroy(); fail(413, 'Images must be 50 MB or smaller.'); } chunks.push(chunk); }
+  return Buffer.concat(chunks);
+}
+function storeImage(image, mediaDir) {
+  let ext;
+  if (image.length >= 24 && image.subarray(0, 8).equals(Buffer.from([137,80,78,71,13,10,26,10]))) ext = 'png';
+  else if (image.length >= 4 && image[0] === 255 && image[1] === 216 && image[2] === 255) ext = 'jpg';
+  else if (image.length >= 12 && image.toString('ascii', 0, 4) === 'RIFF' && image.toString('ascii', 8, 12) === 'WEBP') ext = 'webp';
+  else if (image.length >= 13 && ['GIF87a', 'GIF89a'].includes(image.toString('ascii', 0, 6))) ext = 'gif';
+  else fail(400, 'Upload a PNG, JPEG, WebP or GIF image.');
+  const filename = `${createHash('sha256').update(image).digest('hex')}.${ext}`;
+  writeFileSync(path.join(mediaDir, filename), image);
+  return { image: `/media/${filename}` };
+}
 
 export function createApp({ dataDir = process.env.DATA_DIR || path.join(baseDir, 'data'), publicDir = path.join(baseDir, 'public'), roomTtlMs = 6 * 60 * 60 * 1000, hostUsername = process.env.HOST_USERNAME, hostPassword = process.env.HOST_PASSWORD } = {}) {
   if (!hostUsername || !hostPassword) throw new Error('Set HOST_USERNAME and HOST_PASSWORD before starting Fredagsquizet.');
@@ -99,15 +153,14 @@ export function createApp({ dataDir = process.env.DATA_DIR || path.join(baseDir,
           chunks.push(chunk);
         }
         const image = Buffer.concat(chunks);
-        let ext;
-        if (image.length >= 24 && image.subarray(0, 8).equals(Buffer.from([137,80,78,71,13,10,26,10]))) ext = 'png';
-        else if (image.length >= 4 && image[0] === 255 && image[1] === 216 && image[2] === 255) ext = 'jpg';
-        else if (image.length >= 12 && image.toString('ascii', 0, 4) === 'RIFF' && image.toString('ascii', 8, 12) === 'WEBP') ext = 'webp';
-        else if (image.length >= 13 && ['GIF87a', 'GIF89a'].includes(image.toString('ascii', 0, 6))) ext = 'gif';
-        else fail(400, 'Upload a PNG, JPEG, WebP or GIF image.');
-        const filename = `${createHash('sha256').update(image).digest('hex')}.${ext}`;
-        writeFileSync(path.join(mediaDir, filename), image);
-        return send(res, 201, { image: `/media/${filename}` });
+        return send(res, 201, storeImage(image, mediaDir));
+      }
+      if (req.method === 'POST' && url.pathname === '/api/images/from-url') {
+        authorizeHost(req);
+        owner(req);
+        const input = await body(req);
+        if (typeof input.url !== 'string' || input.url.length > 2048) fail(400, 'Enter an image URL up to 2,048 characters.');
+        return send(res, 201, storeImage(await fetchPublicImage(input.url), mediaDir));
       }
       if ((req.method === 'GET' || req.method === 'HEAD') && mediaPathPattern.test(url.pathname)) {
         let image;

@@ -6,7 +6,7 @@ const escapeHTML = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'
 const randomToken = () => Array.from(crypto.getRandomValues(new Uint8Array(24)), b => b.toString(16).padStart(2, '0')).join('');
 let ownerToken = localStorage.getItem('quizpop-owner');
 if (!ownerToken) { ownerToken = randomToken(); localStorage.setItem('quizpop-owner', ownerToken); }
-let stream, roomState, session, timer, pasteUploadHandler, autosaveTimer, autosaveTask, autosavePending = false, quizzes = [], draft, routeVersion = 0;
+let stream, roomState, session, timer, autosaveTimer, autosaveTask, autosavePending = false, quizzes = [], draft, routeVersion = 0;
 const questionTypes = {'quiz':'Multiple choice', 'true-false':'True or false', 'type-answer':'Type an answer', 'poll':'Poll'};
 const playerEmojis = ['😀', '😎', '🤓', '🥳', '🐸', '🦊', '🐼', '🐙', '🦄', '🐧', '🐢', '🦖', '🍕', '🚀', '⭐', '👾'];
 const newQuestion = () => ({type:'quiz', question:'', image:'', imageAlt:'', answers:['','','',''], correctIndex:0, timeLimit:20});
@@ -133,6 +133,48 @@ async function persistDraft() {
   try { await autosaveTask; } finally { autosaveTask = null; }
 }
 const defaultPicture = q => `/images/${Object.hasOwn(questionTypes, q.type) ? q.type : 'quiz'}.svg`;
+function pictureUrlControls(target) {
+  return `<div class="url-import"><label class="field" for="picture-url-${target}">Paste picture URL</label><div class="form-row"><input class="input" id="picture-url-${target}" type="url" data-picture-url="${target}" placeholder="https://example.com/picture.jpg" maxlength="2048"><button class="btn subtle" type="button" data-load-picture="${target}">Load and crop</button></div><p class="small">Use a publicly accessible image URL. Supported: PNG, JPEG, WebP or GIF · up to 50 MB.</p></div>`;
+}
+function openCropper(source, target, uploadPicture) {
+  const modal = document.createElement('section');
+  modal.className = 'crop-modal';
+  modal.innerHTML = `<div class="crop-card"><h2>Crop your picture</h2><p class="small">Drag the sliders to frame the part you want to keep.</p><div class="crop-stage"><img class="crop-image" alt="Picture crop preview"></div><label class="field" for="crop-ratio">Shape</label><select class="input" id="crop-ratio"><option value="4/3">Landscape 4:3</option><option value="1/1">Square</option><option value="16/9">Wide 16:9</option></select><label class="field" for="crop-zoom">Zoom</label><input class="input crop-range" id="crop-zoom" type="range" min="1" max="3" step="0.01" value="1"><div class="crop-range-row"><label class="field" for="crop-x">Left / right</label><input class="input crop-range" id="crop-x" type="range" min="-1" max="1" step="0.01" value="0"></div><div class="crop-range-row"><label class="field" for="crop-y">Up / down</label><input class="input crop-range" id="crop-y" type="range" min="-1" max="1" step="0.01" value="0"></div><div class="actions crop-actions"><button type="button" class="btn subtle" data-crop-cancel>Cancel</button><button type="button" class="btn primary" data-crop-save>Use this crop</button></div></div>`;
+  app.append(modal);
+  const stage = modal.querySelector('.crop-stage'), image = modal.querySelector('.crop-image');
+  const zoom = modal.querySelector('#crop-zoom'), horizontal = modal.querySelector('#crop-x'), vertical = modal.querySelector('#crop-y');
+  const updatePreview = () => {
+    if (!image.naturalWidth || !stage.clientWidth) return;
+    const width = stage.clientWidth, height = stage.clientHeight;
+    const scale = Math.max(width / image.naturalWidth, height / image.naturalHeight) * Number(zoom.value);
+    const imageWidth = image.naturalWidth * scale, imageHeight = image.naturalHeight * scale;
+    image.style.width = `${imageWidth}px`; image.style.height = `${imageHeight}px`;
+    image.style.left = `${(width - imageWidth) * (Number(horizontal.value) + 1) / 2}px`;
+    image.style.top = `${(height - imageHeight) * (Number(vertical.value) + 1) / 2}px`;
+  };
+  const cropButton = modal.querySelector('[data-crop-save]'); cropButton.disabled = true;
+  image.onload = () => { cropButton.disabled = false; updatePreview(); }; image.src = source;
+  for (const input of [zoom, horizontal, vertical]) input.addEventListener('input', updatePreview);
+  modal.querySelector('#crop-ratio').onchange = event => { stage.style.aspectRatio = event.target.value; requestAnimationFrame(updatePreview); };
+  window.addEventListener('resize', updatePreview);
+  const close = () => { window.removeEventListener('resize', updatePreview); modal.remove(); };
+  modal.querySelector('[data-crop-cancel]').onclick = close;
+  modal.querySelector('[data-crop-save]').onclick = async event => {
+    const button = event.currentTarget; button.disabled = true;
+    try {
+      const bounds = stage.getBoundingClientRect(), scale = image.getBoundingClientRect().width / image.naturalWidth;
+      const imageBounds = image.getBoundingClientRect();
+      const sx = Math.max(0, (bounds.left - imageBounds.left) / scale), sy = Math.max(0, (bounds.top - imageBounds.top) / scale);
+      const sw = Math.min(image.naturalWidth - sx, bounds.width / scale), sh = Math.min(image.naturalHeight - sy, bounds.height / scale);
+      const factor = Math.min(1, Math.sqrt(30000000 / (sw * sh)));
+      const canvas = document.createElement('canvas'); canvas.width = Math.max(1, Math.round(sw * factor)); canvas.height = Math.max(1, Math.round(sh * factor));
+      canvas.getContext('2d').drawImage(image, sx, sy, sw, sh, 0, 0, canvas.width, canvas.height);
+      const blob = await new Promise(resolve => canvas.toBlob(resolve, 'image/jpeg', 0.92));
+      if (!blob) throw new Error('Could not create the cropped picture.');
+      close(); await uploadPicture(new File([blob], 'cropped-picture.jpg', {type:'image/jpeg'}), target);
+    } catch (error) { button.disabled = false; toast(error.message); }
+  };
+}
 function editorQuestion(q, i) {
   const type = q.type || 'quiz';
   let answers;
@@ -145,13 +187,12 @@ function editorQuestion(q, i) {
     <div class="question-heading"><h2>Question ${i + 1}</h2><button class="btn subtle" type="button" data-remove="${i}" ${draft.questions.length === 1 ? 'disabled' : ''} aria-label="Remove question ${i + 1}">Remove</button></div>
     <label class="field" for="type-${i}">Question type</label><select class="input type-select" id="type-${i}" data-type="${i}">${Object.entries(questionTypes).map(([value, label]) => `<option value="${value}" ${value === type ? 'selected' : ''}>${label}</option>`).join('')}</select>
     <label class="field" for="question-${i}">Question heading</label><textarea class="input" id="question-${i}" data-question maxlength="500" required rows="2" placeholder="Type your question…">${escapeHTML(q.question)}</textarea>
-    <div class="image-editor">${q.image ? `<img class="editor-image" src="${escapeHTML(q.image)}" alt="${escapeHTML(q.imageAlt || 'Question image')}"><button class="btn subtle" type="button" data-remove-image="${i}">Remove picture</button>` : `<img class="default-image" src="${defaultPicture(q)}" alt="Colourful quiz illustration"><p class="small">Standard quiz picture · add your own to replace it.</p>`}<button class="btn subtle paste-target" type="button">Paste picture here · Ctrl+V / ⌘V</button><label class="field" for="image-${i}">${q.image ? 'Replace picture' : 'Upload picture'}</label><input class="input" id="image-${i}" type="file" accept="image/png,image/jpeg,image/webp,image/gif" data-image="${i}"><p class="small">Copy an image, click the paste area and press Ctrl+V (⌘V on Mac), or choose a file. PNG, JPEG, WebP or GIF · up to 50 MB.</p>${q.image ? `<label class="field" for="alt-${i}">Picture description</label><input class="input" id="alt-${i}" data-image-alt maxlength="200" placeholder="Describe the picture for players using a screen reader" value="${escapeHTML(q.imageAlt)}">` : ''}</div>
+    <div class="image-editor">${q.image ? `<img class="editor-image" src="${escapeHTML(q.image)}" alt="${escapeHTML(q.imageAlt || 'Question image')}"><button class="btn subtle" type="button" data-remove-image="${i}">Remove picture</button>` : `<img class="default-image" src="${defaultPicture(q)}" alt="Colourful quiz illustration"><p class="small">Standard quiz picture · add your own to replace it.</p>`}<label class="field" for="image-${i}">${q.image ? 'Replace picture' : 'Upload picture'}</label><input class="input" id="image-${i}" type="file" accept="image/png,image/jpeg,image/webp,image/gif" data-image="${i}"><p class="small">PNG, JPEG, WebP or GIF · up to 50 MB.</p>${pictureUrlControls(`question-${i}`)}${q.image ? `<label class="field" for="alt-${i}">Picture description</label><input class="input" id="alt-${i}" data-image-alt maxlength="200" placeholder="Describe the picture for players using a screen reader" value="${escapeHTML(q.imageAlt)}">` : ''}</div>
     ${answers}<div class="form-row"><label class="field" for="time-${i}" style="margin:0">Answer time</label><select class="input" id="time-${i}" data-time>${[...new Set([5,10,20,30,60,90,120,q.timeLimit])].sort((a,b) => a-b).map(t => `<option value="${t}" ${q.timeLimit === t ? 'selected' : ''}>${t} sec</option>`).join('')}</select><span class="small">Starts when the host opens answers.</span></div>
   </article>`;
 }
 function editor() {
-  if (pasteUploadHandler) document.removeEventListener('paste', pasteUploadHandler, true);
-  app.innerHTML = `<section class="shell editor"><div class="topline"><div><p class="eyebrow">Make it your own</p><h1>${draft.id ? 'Edit your quiz' : 'A great game starts here.'}</h1><p>Mix question types, add pictures, and set the pace.</p></div><a class="btn ghost" href="/host#host">Back to library</a></div><form id="editor-form"><label class="field" for="quiz-title">Quiz title</label><input class="input editor-title" id="quiz-title" placeholder="Give your quiz a name" maxlength="120" required value="${escapeHTML(draft.title)}"><section class="card image-editor quiz-cover-editor"><h2 class="question-heading">Quiz cover picture</h2>${draft.coverImage ? `<img class="editor-cover" src="${escapeHTML(draft.coverImage)}" alt="${escapeHTML(draft.coverImageAlt || 'Quiz cover picture')}"><button class="btn subtle" type="button" data-remove-cover>Remove cover picture</button>` : `<img class="default-image" src="/images/quiz.svg" alt="Colourful quiz-themed cover"><p class="small">Standard quiz artwork is used on the library card until you add a cover.</p>`}<button class="btn subtle paste-target" type="button" data-cover-paste>Paste cover picture here · Ctrl+V / ⌘V</button><label class="field" for="cover-image">${draft.coverImage ? 'Replace cover picture' : 'Upload cover picture'}</label><input class="input" id="cover-image" type="file" accept="image/png,image/jpeg,image/webp,image/gif" data-cover-image><p class="small">Copy an image, click here and press Ctrl+V (⌘V on Mac), or choose a file. PNG, JPEG, WebP or GIF · up to 50 MB.</p>${draft.coverImage ? `<label class="field" for="cover-alt">Picture description</label><input class="input" id="cover-alt" data-cover-alt maxlength="200" placeholder="Describe the cover picture" value="${escapeHTML(draft.coverImageAlt || '')}">` : ''}</section>${draft.questions.map(editorQuestion).join('')}<div class="savebar"><button class="btn ghost" id="add-question" type="button" ${draft.questions.length >= 50 ? 'disabled' : ''}>＋ Add question</button><span class="small" id="save-status" role="status" aria-live="polite">${draftIsComplete(draft) ? 'Changes will save automatically' : 'Your work is saved on this device as you type'}</span><button class="btn light" type="submit">Save quiz ✓</button></div></form></section>`;
+  app.innerHTML = `<section class="shell editor"><div class="topline"><div><p class="eyebrow">Make it your own</p><h1>${draft.id ? 'Edit your quiz' : 'A great game starts here.'}</h1><p>Mix question types, add pictures, and set the pace.</p></div><a class="btn ghost" href="/host#host">Back to library</a></div><form id="editor-form"><label class="field" for="quiz-title">Quiz title</label><input class="input editor-title" id="quiz-title" placeholder="Give your quiz a name" maxlength="120" required value="${escapeHTML(draft.title)}"><section class="card image-editor quiz-cover-editor"><h2 class="question-heading">Quiz cover picture</h2>${draft.coverImage ? `<img class="editor-cover" src="${escapeHTML(draft.coverImage)}" alt="${escapeHTML(draft.coverImageAlt || 'Quiz cover picture')}"><button class="btn subtle" type="button" data-remove-cover>Remove cover picture</button>` : `<img class="default-image" src="/images/quiz.svg" alt="Colourful quiz-themed cover"><p class="small">Standard quiz artwork is used on the library card until you add a cover.</p>`}<label class="field" for="cover-image">${draft.coverImage ? 'Replace cover picture' : 'Upload cover picture'}</label><input class="input" id="cover-image" type="file" accept="image/png,image/jpeg,image/webp,image/gif" data-cover-image><p class="small">PNG, JPEG, WebP or GIF · up to 50 MB.</p>${pictureUrlControls('cover')}${draft.coverImage ? `<label class="field" for="cover-alt">Picture description</label><input class="input" id="cover-alt" data-cover-alt maxlength="200" placeholder="Describe the cover picture" value="${escapeHTML(draft.coverImageAlt || '')}">` : ''}</section>${draft.questions.map(editorQuestion).join('')}<div class="savebar"><button class="btn ghost" id="add-question" type="button" ${draft.questions.length >= 50 ? 'disabled' : ''}>＋ Add question</button><span class="small" id="save-status" role="status" aria-live="polite">${draftIsComplete(draft) ? 'Changes will save automatically' : 'Your work is saved on this device as you type'}</span><button class="btn light" type="submit">Save quiz ✓</button></div></form></section>`;
   const form = document.querySelector('#editor-form');
   form.addEventListener('input', scheduleDraftSave);
   form.addEventListener('change', scheduleDraftSave);
@@ -187,33 +228,14 @@ function editor() {
   };
   app.querySelectorAll('[data-image]').forEach(input => input.onchange = () => uploadPicture(input.files[0], Number(input.dataset.image)));
   app.querySelector('[data-cover-image]').onchange = event => uploadPicture(event.target.files[0], 'cover');
-  // Listen in capture phase at the document: browser clipboard events are not
-  // consistently targeted at buttons and other non-editable descendants.
-  pasteUploadHandler = event => {
-    const question = event.target.closest?.('.question-editor');
-    const cover = event.target.closest?.('.quiz-cover-editor');
-    if (!question && !cover) return;
-    const files = [...(event.clipboardData?.files || [])];
-    const items = [...(event.clipboardData?.items || [])];
-    const itemFiles = items.filter(item => item.kind === 'file').map(item => {
-      try { return item.getAsFile(); } catch { return null; }
-    }).filter(Boolean);
-    const file = [...files, ...itemFiles].find(candidate => {
-      const mime = candidate.type.toLowerCase();
-      return ['image/png','image/jpeg','image/webp','image/gif','image/x-png'].includes(mime)
-        || /\.(png|jpe?g|webp|gif)$/i.test(candidate.name || '');
-    });
-    if (!file) {
-      if (event.target.closest?.('.paste-target')) {
-        event.preventDefault();
-        toast('No picture found in the clipboard. Copy the image itself, then click here and press Ctrl+V or ⌘V.');
-      }
-      return; // Ordinary text paste in headings and answers remains unchanged.
-    }
-    event.preventDefault();
-    uploadPicture(file, cover && !question ? 'cover' : [...app.querySelectorAll('.question-editor')].indexOf(question));
-  };
-  document.addEventListener('paste', pasteUploadHandler, true);
+  app.querySelectorAll('[data-load-picture]').forEach(button => button.onclick = () => run(button, async () => {
+    const version = routeVersion, target = button.dataset.loadPicture;
+    readDraft(); cacheDraft();
+    const url = app.querySelector(`[data-picture-url="${target}"]`).value.trim();
+    if (!url) throw new Error('Paste an image URL first.');
+    const result = await api('/images/from-url', {method:'POST', body:{url}});
+    if (version === routeVersion) openCropper(result.image, target === 'cover' ? 'cover' : Number(target.slice('question-'.length)), uploadPicture);
+  }));
   document.querySelector('#editor-form').onsubmit = event => { event.preventDefault(); run(event.submitter, async () => {
     clearTimeout(autosaveTimer);
     if (autosaveTask) await autosaveTask;
@@ -308,7 +330,6 @@ function updateTimer() {
 }
 async function route() {
   const version=++routeVersion;stream?.close();stream=null;clearInterval(timer);roomState=null;
-  if (pasteUploadHandler) { document.removeEventListener('paste', pasteUploadHandler, true); pasteUploadHandler = null; }
   const [page,arg,pin]=location.hash.slice(1).split('/');
   if ((['host','create','edit'].includes(page) || (page === 'room' && arg === 'host')) && location.pathname !== '/host') { location.replace(`/host${location.hash}`); return; }
   try {

@@ -73,7 +73,7 @@ In **Create quiz** or **Edit**, choose a question type for each question:
 - **Type an answer:** enter up to 10 accepted answers, one per line. Players type their response. Matching ignores capitalization and extra whitespace, with Unicode normalization; punctuation still matters.
 - **Poll:** players vote on one choice. Results show vote counts; this round awards no points and has no leaderboard. A quiz containing only polls has no final winner.
 
-Use **Upload cover picture** near the quiz title to add an image shown on that quiz's library card. Use **Upload picture** under a question heading to add an image for that question. Both accept PNG, JPEG, WebP, or GIF (maximum 50 MB; the editor accepts up to 30 megapixels). You can also paste a copied image. Add a description for accessibility. Pictures can be replaced or removed in the editor. Quiz edits save automatically as you work; incomplete drafts are kept in the same browser and sync to the server once the required fields are valid.
+Use **Upload cover picture** near the quiz title to add an image shown on that quiz's library card. Use **Upload picture** under a question heading to add an image for that question. Both accept PNG, JPEG, WebP, or GIF (maximum 50 MB; the editor accepts up to 30 megapixels). You can also paste a public image URL, load it, and crop it to a landscape, square, or wide frame. Add a description for accessibility. Pictures can be replaced or removed in the editor. Quiz edits save automatically as you work; incomplete drafts are kept in the same browser and sync to the server once the required fields are valid.
 
 Every question starts in **preview** on both host and player screens, displaying only the heading and optional picture. The host clicks **Open answers** to show the choices or typed-answer field and start the full answer timer. Preview has no timer; it survives refreshing the host screen. Correct answers and accepted typed responses stay hidden until the reveal.
 
@@ -81,13 +81,11 @@ Existing quizzes work as multiple-choice questions without needing conversion. T
 
 Uploaded pictures live in `/app/data/media` in the same persistent Docker volume as quizzes. Include that directory when backing up. Removing a picture from a question does not immediately delete its file, since another quiz or active game may use it. Uploaded pictures are accessible to anyone with their image URL on this server; only upload material intended for your players.
 
-## Paste pictures and default artwork
+## Picture URLs, cropping, and default artwork
 
-Copy an image, click **Paste picture here** on the desired question, and press **Ctrl+V** (or **⌘V** on Mac). The app listens for pasted image files anywhere inside that question, including the paste button, heading, and answers; ordinary text paste works normally. Copy the image itself, not just its URL. Clipboard images use the same validation and persistent storage as file uploads, and the paste gesture works on local-network HTTP without requesting clipboard-read access.
+Paste a public picture URL into the URL field for a quiz cover or question, then choose **Load and crop**. The crop tool previews landscape, square, and wide frames; adjust zoom and position before saving. URL imports must return PNG, JPEG, WebP, or GIF image data no larger than 50 MB. Private-network addresses and redirects are rejected. Players choose one of the available emojis after entering the game PIN; the chosen emoji appears beside their nickname in the lobby and scoreboards.
 
-Quiz cover pictures support the same paste workflow using **Paste cover picture here**. Players choose one of the available emojis after entering the game PIN; the chosen emoji appears beside their nickname in the lobby and scoreboards.
-
-Questions without an uploaded or pasted picture automatically show original colourful quiz-themed artwork. Each question type has its own illustration, shown in the editor, preview, answering, and results. Removing a custom picture restores the default. No external image service is needed.
+Questions without an uploaded or URL-imported picture automatically show original colourful quiz-themed artwork. Each question type has its own illustration, shown in the editor, preview, answering, and results. Removing a custom picture restores the default. No external image service is needed.
 
 The application and Compose service are named **Fredagsquizet** (`fredagsquizet` in Compose). Existing browser ownership/session keys and the `quiz-data` volume remain unchanged so the rename preserves saved quizzes.
 
