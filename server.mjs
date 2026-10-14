@@ -231,7 +231,7 @@ export function createApp({ dataDir = process.env.DATA_DIR || path.join(baseDir,
         if (req.method === 'GET' && parts.length === 2) {
           authorizeHost(req);
           const games = [...rooms.values()].sort((a, b) => b.touchedAt - a.touchedAt).map(room => ({
-            pin: room.pin, quizTitle: room.quiz.title, status: room.status, playerCount: room.players.size,
+            pin: room.pin, quizId: room.quiz.id, quizTitle: room.quiz.title, status: room.status, playerCount: room.players.size,
             scoreboardAvailable: room.status === 'finished' && room.quiz.questions.some(q => q.type !== 'poll') && !room.scoreboardDeleted,
             scoreboardVisible: room.scoreboardVisible === true, scoreboardDeleted: room.scoreboardDeleted === true,
             leaderboard: room.status === 'finished' && !room.scoreboardDeleted ? rank(room) : [], hostToken: room.hostToken,

@@ -42,7 +42,7 @@ test('host game manager lists active quizzes, exposes final scoreboards, and can
   const unauthenticated = await fetch(`${f.base}/api/rooms`);
   assert.equal(unauthenticated.status,401,'game management requires host basic auth');
   let games = (await f.request('/api/rooms')).data;
-  assert.equal(games.length,1);assert.equal(games[0].quizTitle,quiz.title);assert.equal(games[0].status,'lobby');
+  assert.equal(games.length,1);assert.equal(games[0].quizTitle,quiz.title);assert.ok(games[0].quizId);assert.equal(games[0].status,'lobby');
   assert.equal(games[0].scoreboardAvailable,false);
   await f.request(`/api/rooms/${room.pin}/end`,{method:'POST',token:room.hostToken});
   games = (await f.request('/api/rooms')).data;
