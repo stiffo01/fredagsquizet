@@ -45,7 +45,7 @@ docker compose down
 
 Saved quizzes persist in the `quiz-data` Docker volume at `/app/data/quizzes.json`. Stopping or rebuilding the container preserves this volume. `docker compose down -v` deletes saved quizzes.
 
-Quiz ownership uses a secret capability stored in the browser's localStorage. Use the same browser profile and site address to return to your saved library. Clearing browser storage loses access to its saved quizzes; changing the hostname or port creates a separate browser storage origin. This is a lightweight local quiz library without account recovery or shared user accounts. Keep browser storage private.
+All hosts who sign in with the configured Basic Auth credentials share one quiz library. Quizzes are stored in the Docker volume and remain available across browsers and browser storage resets. Each quiz can include a creator name, which appears on its library card. Any authenticated host can edit or remove a saved quiz.
 
 Active rooms, player sessions, and game scores live in server memory and reset whenever the server restarts. Run one application instance against its own data volume. The Compose service runs as the unprivileged `node` user with a read-only root filesystem; only the data volume and temporary directory are writable.
 
@@ -75,7 +75,7 @@ In **Create quiz** or **Edit**, choose a question type for each question:
 - **Type an answer:** enter up to 10 accepted answers, one per line. Players type their response. Matching ignores capitalization and extra whitespace, with Unicode normalization; punctuation still matters.
 - **Poll:** players vote on one choice. Results show vote counts; this round awards no points and has no leaderboard. A quiz containing only polls has no final winner.
 
-Use **Upload cover picture** near the quiz title to add an image shown on that quiz's library card. Use **Upload picture** under a question heading to add an image for that question. Both accept PNG, JPEG, WebP, or GIF (maximum 50 MB; the editor accepts up to 30 megapixels). You can also paste a public image URL, load it, and crop it to a landscape, square, or wide frame. Add a description for accessibility. Pictures can be replaced or removed in the editor. Quiz edits save automatically as you work; incomplete drafts are kept in the same browser and sync to the server once the required fields are valid.
+Enter an optional creator name near the quiz title to identify who made it; all authenticated hosts see that name on its library card. Use **Upload cover picture** near the title to add an image shown on that quiz's library card. Use **Upload picture** under a question heading to add an image for that question. Both accept PNG, JPEG, WebP, or GIF (maximum 50 MB; the editor accepts up to 30 megapixels). You can also paste a public image URL, load it, and crop it to a landscape, square, or wide frame. Add a description for accessibility. Pictures can be replaced or removed in the editor. Quiz edits save automatically as you work; incomplete drafts are kept in the same browser and sync to the server once the required fields are valid.
 
 Every question starts in **preview** on both host and player screens, displaying only the heading and optional picture. The host clicks **Open answers** to show the choices or typed-answer field and start the full answer timer. Preview has no timer; it survives refreshing the host screen. Correct answers and accepted typed responses stay hidden until the reveal.
 

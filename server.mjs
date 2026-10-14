@@ -173,18 +173,17 @@ export function createApp({ dataDir = process.env.DATA_DIR || path.join(baseDir,
         authorizeHost(req);
         const id = parts[2];
         if (req.method === 'GET') {
-          const hash = bearer(req) ? owner(req) : null;
-          const hiddenSample = hash && saved.some(q => q.owner === hash && q.hiddenSample);
-          const quizzes = [...(hiddenSample ? [] : [sampleQuiz]), featureTestQuiz, ...saved.filter(q => q.owner === hash && !q.hiddenSample).map(publicQuiz)];
+          const hiddenSample = saved.some(q => q.hiddenSample);
+          const quizzes = [...(hiddenSample ? [] : [sampleQuiz]), featureTestQuiz, ...saved.filter(q => !q.hiddenSample).map(publicQuiz)];
           if (id) { const quiz = quizzes.find(q => q.id === id); if (!quiz) fail(404, 'Quiz not found.'); return send(res, 200, quiz); }
           return send(res, 200, quizzes);
         }
         const hash = owner(req);
-        if (req.method === 'DELETE' && id === 'sample') { persist([...saved.filter(q => q.owner !== hash || !q.hiddenSample), { owner: hash, hiddenSample: true }]); return send(res, 200, { ok: true }); }
-        if (req.method === 'POST' && !id) { if (saved.filter(q => q.owner === hash && !q.hiddenSample).length >= 100) fail(409, 'Quiz library limit reached.'); const quiz = validateQuiz(await body(req)); persist([...saved, { ...quiz, owner: hash }]); return send(res, 201, quiz); }
-        const existing = saved.find(q => q.id === id && q.owner === hash);
+        if (req.method === 'DELETE' && id === 'sample') { persist([...saved.filter(q => !q.hiddenSample), { owner: hash, hiddenSample: true }]); return send(res, 200, { ok: true }); }
+        if (req.method === 'POST' && !id) { if (saved.filter(q => !q.hiddenSample).length >= 100) fail(409, 'Quiz library limit reached.'); const quiz = validateQuiz(await body(req)); persist([...saved, { ...quiz, owner: hash }]); return send(res, 201, quiz); }
+        const existing = saved.find(q => q.id === id && !q.hiddenSample);
         if (!existing) fail(404, 'Quiz not found.');
-        if (req.method === 'PUT') { const quiz = validateQuiz(await body(req), id); persist(saved.map(q => q === existing ? { ...quiz, owner: hash } : q)); return send(res, 200, quiz); }
+        if (req.method === 'PUT') { const quiz = validateQuiz(await body(req), id); persist(saved.map(q => q === existing ? { ...quiz, owner: existing.owner || hash } : q)); return send(res, 200, quiz); }
         if (req.method === 'DELETE') { persist(saved.filter(q => q !== existing)); return send(res, 200, { ok: true }); }
       }
       if (parts[0] === 'api' && parts[1] === 'rooms') {
@@ -196,7 +195,7 @@ export function createApp({ dataDir = process.env.DATA_DIR || path.join(baseDir,
           if (input.quiz) quiz = validateQuiz(input.quiz);
           else if (!input.quizId || input.quizId === 'sample') quiz = sampleQuiz;
           else if (input.quizId === 'feature-test') quiz = featureTestQuiz;
-          else { const token = bearer(req) || input.ownerToken; quiz = saved.find(q => q.id === input.quizId && token && q.owner === ownerHash(token)); }
+          else quiz = saved.find(q => q.id === input.quizId && !q.hiddenSample);
           if (!quiz) fail(404, 'Quiz not found.');
           let pin; do { pin = String(randomInt(100000, 1000000)); } while (rooms.has(pin));
           const room = { pin, quiz: structuredClone(quiz), hostToken: secret(), players: new Map(), clients: new Set(), status: 'lobby', index: -1, touchedAt: Date.now() };
