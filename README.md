@@ -58,3 +58,20 @@ Open http://localhost:3000. Set `PORT` to change the listening port and `DATA_DI
 The implementation uses static inspection of the public player bundle as a reference and REA tooling from [morluto/rea](https://github.com/morluto/rea). See [research notes](docs/research.md) for observations, tooling, and limitations.
 
 This is an independent implementation with its own local server and quizzes. It does not connect to Kahoot's proprietary backend, accept Kahoot game PINs, import private quizzes, or implement every Kahoot feature. It is not affiliated with or endorsed by Kahoot. Kahoot is a trademark of its respective owner.
+
+## Pictures, previews, and question types
+
+In **Create quiz** or **Edit**, choose a question type for each question:
+
+- **Multiple choice:** choose one correct answer from 2–4 choices.
+- **True or false:** two fixed choices; select the correct one.
+- **Type an answer:** enter up to 10 accepted answers, one per line. Players type their response. Matching ignores capitalization and extra whitespace, with Unicode normalization; punctuation still matters.
+- **Poll:** players vote on one choice. Results show vote counts; this round awards no points and has no leaderboard. A quiz containing only polls has no final winner.
+
+Use **Upload picture** under the question heading to add a PNG, JPEG, WebP, or GIF (maximum 5 MB; the editor accepts up to 30 megapixels). Add a description for accessibility. Pictures can be replaced or removed in the editor and remain visible during answering and results.
+
+Every question starts in **preview** on both host and player screens, displaying only the heading and optional picture. The host clicks **Open answers** to show the choices or typed-answer field and start the full answer timer. Preview has no timer; it survives refreshing the host screen. Correct answers and accepted typed responses stay hidden until the reveal.
+
+Existing quizzes work as multiple-choice questions without needing conversion. The included curiosity quiz demonstrates all four types.
+
+Uploaded pictures live in `/app/data/media` in the same persistent Docker volume as quizzes. Include that directory when backing up. Removing a picture from a question does not immediately delete its file, since another quiz or active game may use it. Uploaded pictures are accessible to anyone with their image URL on this server; only upload material intended for your players.

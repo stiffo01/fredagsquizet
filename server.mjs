@@ -4,7 +4,7 @@ import { mkdirSync, readFileSync, writeFileSync, renameSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { sampleQuiz, validateQuiz } from './lib/quiz.mjs';
+import { sampleQuiz, validateQuiz, normalizeAnswer, mediaPathPattern } from './lib/quiz.mjs';
 
 const baseDir = path.dirname(fileURLToPath(import.meta.url));
 const secret = () => randomBytes(24).toString('base64url');
@@ -13,6 +13,8 @@ const ownerHash = token => createHash('sha256').update(token).digest('hex');
 
 export function createApp({ dataDir = process.env.DATA_DIR || path.join(baseDir, 'data'), publicDir = path.join(baseDir, 'public'), roomTtlMs = 6 * 60 * 60 * 1000 } = {}) {
   mkdirSync(dataDir, { recursive: true });
+  const mediaDir = path.join(dataDir, 'media');
+  mkdirSync(mediaDir, { recursive: true });
   const storePath = path.join(dataDir, 'quizzes.json');
   let saved = [];
   try { saved = JSON.parse(readFileSync(storePath, 'utf8')); if (!Array.isArray(saved)) throw new Error('Invalid quiz store'); }
@@ -26,17 +28,23 @@ export function createApp({ dataDir = process.env.DATA_DIR || path.join(baseDir,
   const identity = (room, token) => token && token === room.hostToken ? { host: true } : room.players.get(token);
   const state = (room, who) => {
     const question = room.quiz.questions[room.index];
-    const result = { pin: room.pin, status: room.status, quizTitle: room.quiz.title, questionIndex: room.index, questionCount: room.quiz.questions.length, players: rank(room), leaderboard: rank(room), answeredCount: [...room.players.values()].filter(p => p.answer !== undefined).length, host: !!who.host };
+    const result = { pin: room.pin, status: room.status, quizTitle: room.quiz.title, hasScoredQuestions: room.quiz.questions.some(q => q.type !== 'poll'), questionIndex: room.index, questionCount: room.quiz.questions.length, players: rank(room), leaderboard: rank(room), answeredCount: [...room.players.values()].filter(p => p.answer !== undefined).length, host: !!who.host };
     if (question && room.status !== 'lobby') {
-      result.question = { question: question.question, answers: question.answers, timeLimit: question.timeLimit, startedAt: room.startedAt, deadline: room.deadline };
-      if (room.status !== 'question') {
+      result.question = { type: question.type ?? 'quiz', question: question.question, image: question.image || '', imageAlt: question.imageAlt || '', timeLimit: question.timeLimit };
+      if (room.status !== 'preview') {
+        result.question.answers = question.answers;
+        result.question.startedAt = room.startedAt;
+        result.question.deadline = room.deadline;
+      }
+      if (room.status === 'reveal' || room.status === 'finished') {
+        result.question.acceptedAnswers = question.acceptedAnswers;
         result.question.correctIndex = question.correctIndex;
-        result.answerCounts = question.answers.map((_, i) => [...room.players.values()].filter(p => p.answer === i).length);
+        result.answerCounts = question.answers?.map((_, i) => [...room.players.values()].filter(p => p.answer === i).length);
       }
     }
     if (!who.host) {
-      result.self = { id: who.id, nickname: who.nickname, score: who.score, answered: who.answer !== undefined, answerIndex: who.answer };
-      if (room.status === 'reveal' || room.status === 'finished') { result.self.correct = who.answer !== undefined && who.answer === question?.correctIndex; result.self.points = who.points || 0; }
+      result.self = { id: who.id, nickname: who.nickname, score: who.score, answered: who.answer !== undefined, ...(typeof who.answer === 'number' ? {answerIndex: who.answer} : {answerText: who.answer}) };
+      if (room.status === 'reveal' || room.status === 'finished') { result.self.correct = who.answer !== undefined && who.correct === true; result.self.points = who.points || 0; }
     }
     return result;
   };
@@ -46,13 +54,17 @@ export function createApp({ dataDir = process.env.DATA_DIR || path.join(baseDir,
     clearTimeout(room.timer);
     room.index++;
     if (room.index >= room.quiz.questions.length) { room.index = room.quiz.questions.length - 1; room.status = 'finished'; broadcast(room); return; }
-    for (const p of room.players.values()) { p.answer = undefined; p.points = 0; }
+    for (const p of room.players.values()) { p.answer = undefined; p.points = 0; p.correct = false; }
+    room.status = 'preview'; room.startedAt = undefined; room.deadline = undefined; broadcast(room);
+  };
+  const openAnswers = room => {
     room.status = 'question'; room.startedAt = Date.now(); room.deadline = room.startedAt + room.quiz.questions[room.index].timeLimit * 1000;
     room.timer = setTimeout(() => reveal(room), room.deadline - Date.now()); room.timer.unref(); broadcast(room);
   };
   const send = (res, status, data) => { res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' }); res.end(JSON.stringify(data)); };
   const body = async req => {
-    let text = ''; for await (const chunk of req) { text += chunk; if (Buffer.byteLength(text) > 128 * 1024) fail(413, 'Request too large.'); }
+    const chunks = []; let bytes = 0; for await (const chunk of req) { bytes += chunk.length; if (bytes > 128 * 1024) fail(413, 'Request too large.'); chunks.push(chunk); }
+    const text = Buffer.concat(chunks).toString('utf8');
     try { const parsed = text ? JSON.parse(text) : {}; if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) fail(400, 'Expected a JSON object.'); return parsed; } catch { fail(400, 'Invalid JSON object.'); }
   };
   const server = http.createServer(async (req, res) => {
@@ -62,6 +74,32 @@ export function createApp({ dataDir = process.env.DATA_DIR || path.join(baseDir,
       const url = new URL(req.url, 'http://localhost');
       const parts = url.pathname.split('/').filter(Boolean);
       if (req.method === 'GET' && url.pathname === '/api/health') return send(res, 200, { ok: true });
+      if (req.method === 'POST' && url.pathname === '/api/images') {
+        owner(req);
+        const chunks = []; let bytes = 0;
+        for await (const chunk of req) {
+          bytes += chunk.length;
+          if (bytes > 5 * 1024 * 1024) fail(413, 'Images must be 5 MB or smaller.');
+          chunks.push(chunk);
+        }
+        const image = Buffer.concat(chunks);
+        let ext;
+        if (image.length >= 24 && image.subarray(0, 8).equals(Buffer.from([137,80,78,71,13,10,26,10]))) ext = 'png';
+        else if (image.length >= 4 && image[0] === 255 && image[1] === 216 && image[2] === 255) ext = 'jpg';
+        else if (image.length >= 12 && image.toString('ascii', 0, 4) === 'RIFF' && image.toString('ascii', 8, 12) === 'WEBP') ext = 'webp';
+        else if (image.length >= 13 && ['GIF87a', 'GIF89a'].includes(image.toString('ascii', 0, 6))) ext = 'gif';
+        else fail(400, 'Upload a PNG, JPEG, WebP or GIF image.');
+        const filename = `${createHash('sha256').update(image).digest('hex')}.${ext}`;
+        writeFileSync(path.join(mediaDir, filename), image);
+        return send(res, 201, { image: `/media/${filename}` });
+      }
+      if ((req.method === 'GET' || req.method === 'HEAD') && mediaPathPattern.test(url.pathname)) {
+        let image;
+        try { image = await readFile(path.join(mediaDir, path.basename(url.pathname))); } catch { fail(404, 'Image not found.'); }
+        const ext = path.extname(url.pathname).slice(1);
+        res.writeHead(200, { 'Content-Type': `image/${ext === 'jpg' ? 'jpeg' : ext}`, 'Cache-Control': 'public, max-age=31536000, immutable', 'Content-Security-Policy': "default-src 'none'" });
+        return res.end(req.method === 'HEAD' ? undefined : image);
+      }
       if (parts[0] === 'api' && parts[1] === 'quizzes') {
         const id = parts[2];
         if (req.method === 'GET') {
@@ -115,19 +153,26 @@ export function createApp({ dataDir = process.env.DATA_DIR || path.join(baseDir,
         }
         if (req.method === 'POST' && action === 'answer') {
           if (who.host) fail(403, 'Only players can answer.');
-          const { answerIndex, questionIndex } = await body(req);
+          const { answerIndex, answerText, questionIndex } = await body(req);
           if (room.status !== 'question' || Date.now() >= room.deadline) { reveal(room); fail(409, 'Answers are closed.'); }
           if (questionIndex !== room.index) fail(409, 'This question is no longer active.');
           if (who.answer !== undefined) fail(409, 'Your answer has already been submitted.');
           const q = room.quiz.questions[room.index];
-          if (!Number.isInteger(answerIndex) || answerIndex < 0 || answerIndex >= q.answers.length) fail(400, 'Choose a valid answer.');
-          who.answer = answerIndex; who.points = answerIndex === q.correctIndex ? Math.round(500 + 500 * Math.max(0, 1 - (Date.now() - room.startedAt) / (q.timeLimit * 1000))) : 0;
+          if (q.type === 'type-answer') {
+            if (typeof answerText !== 'string' || !answerText.trim() || answerText.length > 200) fail(400, 'Type an answer of 1–200 characters.');
+            who.answer = answerText.trim(); who.correct = q.acceptedAnswers.some(a => normalizeAnswer(a) === normalizeAnswer(answerText));
+          } else {
+            if (!Number.isInteger(answerIndex) || answerIndex < 0 || answerIndex >= q.answers.length) fail(400, 'Choose a valid answer.');
+            who.answer = answerIndex; who.correct = q.type !== 'poll' && answerIndex === q.correctIndex;
+          }
+          who.points = who.correct ? Math.round(500 + 500 * Math.max(0, 1 - (Date.now() - room.startedAt) / (q.timeLimit * 1000))) : 0;
           if ([...room.players.values()].every(p => p.answer !== undefined)) reveal(room); else broadcast(room);
           return send(res, 200, { ok: true });
         }
-        if (req.method === 'POST' && ['start', 'next', 'end'].includes(action)) {
+        if (req.method === 'POST' && ['start', 'open', 'next', 'end'].includes(action)) {
           if (!who.host) fail(403, 'Only the host can control the game.');
           if (action === 'start') { if (room.status !== 'lobby') fail(409, 'Game already started.'); if (!room.players.size) fail(409, 'Wait for at least one player.'); advance(room); }
+          if (action === 'open') { if (room.status !== 'preview') fail(409, 'The question is not in preview.'); openAnswers(room); }
           if (action === 'next') { if (room.status === 'question') reveal(room); else if (room.status === 'reveal') advance(room); else fail(409, 'No next question available.'); }
           if (action === 'end') { if (room.status === 'question') reveal(room); clearTimeout(room.timer); room.status = 'finished'; broadcast(room); }
           return send(res, 200, state(room, who));

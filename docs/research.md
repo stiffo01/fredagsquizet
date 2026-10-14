@@ -38,3 +38,11 @@ Completed checks on 2026-10-14:
 - Headless Chromium passed quiz creation, hosting, two separate player tabs, answer feedback, scoring, final podium, host refresh, mobile-width overflow, and uncaught-exception checks. No pixel capture.
 - `docker compose up --build -d --wait` built successfully on Node 24 Alpine and reported the service healthy. Direct HTTP `/api/health` on port 8095 returned `{"ok":true}`.
 - Ports 8080 and 8091 were occupied by existing services; the default port is 8095.
+
+## Question types and preview extension
+
+Consulted Kahoot's official [question-type guide](https://support.kahoot.com/hc/en-us/articles/115002308428-Kahoot-question-types) for the follow-up feature request. It describes fixed true/false choices, typed answers with accepted responses, and unscored opinion polls. QuizPop now supports those three alongside multiple choice, with local image uploads for every type. Its typed-answer matching ignores case and whitespace but keeps punctuation significant; this is not an exact implementation of Kahoot's matching rules.
+
+The host-controlled reading stage is a requested local design: `lobby → preview → question → reveal → preview … → finished`. Only the host can open answers. Preview exposes heading/image/type/time-limit metadata; choices, accepted responses, correct answers, and timing timestamps are withheld. Opening starts the full answer duration. Images persist in the existing data volume and are served as raster media, not executable uploads.
+
+Extension validation: six backend integration tests pass, including image upload size/type checks and restart persistence, preview answer secrecy and timer gating, typed-answer normalization, poll scoring, and legacy quiz behavior. The Chromium test passes an uploaded picture through editor save/reload, checks the picture on a phone-width preview, then plays all four types with two players and verifies typed drafts survive SSE updates. No screenshots were taken.
