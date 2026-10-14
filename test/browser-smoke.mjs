@@ -28,7 +28,7 @@ try {
     socket.onmessage=e=>{const m=JSON.parse(e.data);if(m.id){const p=pending.get(m.id);if(p){pending.delete(m.id);m.error?p.reject(new Error(m.error.message)):p.resolve(m.result);}}if(m.method==='Runtime.exceptionThrown')exceptions.push(m.params.exceptionDetails);};
     const call=(method,params={})=>new Promise((resolve,reject)=>{const key=++id;pending.set(key,{resolve,reject});socket.send(JSON.stringify({id:key,method,params}));});
     const evaluate=async expression=>{const r=await call('Runtime.evaluate',{expression,returnByValue:true,awaitPromise:true});if(r.exceptionDetails)throw new Error(JSON.stringify(r.exceptionDetails));return r.result.value;};
-    const wait=async expression=>{for(let i=0;i<100;i++){if(await evaluate(expression))return;await new Promise(r=>setTimeout(r,50));}throw new Error(`Wait failed: ${expression}\n${await evaluate('document.body.innerText')}`);};
+    const wait=async expression=>{for(let i=0;i<100;i++){if(await evaluate(expression))return;await new Promise(r=>setTimeout(r,50));}throw new Error(`Wait failed: ${expression}\nURL: ${await evaluate('location.href')}\n${await evaluate('document.body.innerText')}`);};
     const click=async selector=>{await wait(`!!document.querySelector(${JSON.stringify(selector)})`);await evaluate(`document.querySelector(${JSON.stringify(selector)}).click()`);};
     await call('Runtime.enable');await wait('document.readyState === "complete" && !!document.querySelector("#app")');
     return {evaluate,wait,click,call,exceptions};
@@ -82,17 +82,19 @@ try {
   await host.wait('!!document.querySelector(".pin-display strong")');
   await host.wait('document.querySelector(".qr-invite img")?.naturalWidth > 0');
   const pin=await host.evaluate('document.querySelector(".pin-display strong").textContent');
-  async function join(name) {
+  async function join(name, blockEventStream=false) {
     const p=await page(`#join/${pin}`);
     await p.wait('!!document.querySelector("#join-form")');
+    if(blockEventStream) await p.evaluate(`window.EventSource=class { constructor(){setTimeout(()=>this.onerror?.(new Event('error')),0)} addEventListener(){} close(){} }`);
     await p.evaluate('document.querySelector("#join-form").requestSubmit()');
     await p.evaluate(`document.querySelector('#nickname').value=${JSON.stringify(name)};document.querySelector('#nickname-form').requestSubmit()`);
     await p.wait('document.body.innerText.includes("Your host will start")');
     return p;
   }
-  const alice=await join('Alice'),bob=await join('Bob');
+  const alice=await join('Alice',true),bob=await join('Bob');
   await host.wait('document.querySelectorAll(".player-chip").length===2');
   await host.click('[data-action=start]');
+  await alice.wait('!!document.querySelector("#start-countdown")');
   await alice.wait('!!document.querySelector(".preview-note")');
   await host.wait('!!document.querySelector(".question-picture img")');
   await alice.wait('document.querySelector(".question-picture img")?.naturalWidth > 0');

@@ -14,7 +14,7 @@ const escapeHTML = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'
 const randomToken = () => Array.from(crypto.getRandomValues(new Uint8Array(24)), b => b.toString(16).padStart(2, '0')).join('');
 let ownerToken = localStorage.getItem('quizpop-owner');
 if (!ownerToken) { ownerToken = randomToken(); localStorage.setItem('quizpop-owner', ownerToken); }
-let stream, roomState, session, timer, autosaveTimer, autosaveTask, autosavePending = false, quizzes = [], draft, routeVersion = 0, playerAnswerOnly = false;
+let stream, roomState, session, timer, streamWatchdog, statePoll, streamLastSignal = 0, autosaveTimer, autosaveTask, autosavePending = false, quizzes = [], draft, routeVersion = 0, playerAnswerOnly = false;
 const questionTypes = {'quiz':'Multiple choice', 'true-false':'True or false', 'type-answer':'Type an answer', 'poll':'Poll'};
 const playerEmojis = ['😀', '😎', '🤓', '🥳', '🐸', '🦊', '🐼', '🐙', '🦄', '🐧', '🐢', '🦖', '🍕', '🚀', '⭐', '👾'];
 const newQuestion = () => ({type:'quiz', question:'', image:'', imageAlt:'', revealImage:'', revealImageAlt:'', showRevealImage:false, answers:['','','',''], correctIndex:0, timeLimit:20});
@@ -307,10 +307,23 @@ async function connectRoom(role, pin, version) {
   roomState = await api(`/rooms/${pin}/state`,{token:session.token});
   if (version !== routeVersion) return;
   renderRoom();
+  streamLastSignal = Date.now();
+  const stopStatePoll = () => { clearInterval(statePoll); statePoll = null; };
+  const pollState = async () => {
+    try {
+      const latest = await api(`/rooms/${pin}/state`,{token:session.token});
+      if (version !== routeVersion) return;
+      if (JSON.stringify(latest) !== JSON.stringify(roomState)) { roomState = latest; renderRoom(); }
+    } catch {}
+  };
+  const startStatePoll = () => { if (!statePoll) { const el=document.querySelector('.connection'); if(el) el.textContent='● Syncing'; pollState(); statePoll = setInterval(pollState,1500); } };
+  const markStreamAlive = () => { streamLastSignal = Date.now(); stopStatePoll(); const el=document.querySelector('.connection'); if(el) el.textContent='● Connected'; };
   stream = new EventSource(`/api/rooms/${pin}/events?token=${encodeURIComponent(session.token)}`);
-  stream.addEventListener('state',event => { if(version !== routeVersion) return; roomState = JSON.parse(event.data); renderRoom(); });
-  stream.onopen = () => { const el=document.querySelector('.connection'); if(el) el.textContent='● Connected'; };
-  stream.onerror = () => { const el=document.querySelector('.connection'); if(el) el.textContent='Reconnecting…'; };
+  stream.addEventListener('state',event => { if(version !== routeVersion) return; markStreamAlive(); roomState = JSON.parse(event.data); renderRoom(); });
+  stream.addEventListener('ping',markStreamAlive);
+  stream.onopen = () => { markStreamAlive(); const el=document.querySelector('.connection'); if(el) el.textContent='● Connected'; };
+  stream.onerror = () => { const el=document.querySelector('.connection'); if(el) el.textContent='Reconnecting…'; startStatePoll(); };
+  streamWatchdog = setInterval(() => { if(Date.now()-streamLastSignal>5000) startStatePoll(); },1000);
   timer = setInterval(updateTimer,250);
 }
 function leaderboard(players, {full=false, showCorrect=false}={}) {
@@ -427,7 +440,7 @@ function updateTimer() {
   const progress=document.querySelector('#time-progress');if(progress)progress.style.width=`${remaining/(roomState.question.timeLimit*1000)*100}%`;
 }
 async function route() {
-  const version=++routeVersion;stream?.close();stream=null;clearInterval(timer);roomState=null;
+  const version=++routeVersion;stream?.close();stream=null;clearInterval(timer);clearInterval(streamWatchdog);clearInterval(statePoll);statePoll=null;roomState=null;
   const [page,arg,pin]=location.hash.slice(1).split('/');
   document.body.classList.toggle('playing-game', page === 'room');
   setGithubActive(page !== 'room');

@@ -191,6 +191,13 @@ test('SSE sends authorized state and reconnects using the same player token', as
     const { value } = await response.body.getReader().read();
     const text = new TextDecoder().decode(value); assert.match(text, /event: state/); assert.match(text, /Returning player/); assert.doesNotMatch(text, /correctIndex/); controller.abort();
   }
+  const controller = new AbortController();
+  const response = await fetch(`${f.base}${route}/events?token=${token}`, { signal: controller.signal });
+  const reader = response.body.getReader();
+  await reader.read();
+  const heartbeat = new TextDecoder().decode((await reader.read()).value);
+  assert.match(heartbeat, /event: ping/, 'the client can detect a stalled event stream');
+  controller.abort();
   assert.equal((await f.request(`${route}/state`, { token })).data.players.length, 1);
 });
 

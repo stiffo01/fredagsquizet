@@ -272,7 +272,7 @@ export function createApp({ dataDir = process.env.DATA_DIR || path.join(baseDir,
           if ([...room.clients].filter(c => c.who === who || (c.who.host && who.host)).length >= 5) fail(429, 'Too many live connections.');
           res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache, no-transform', Connection: 'keep-alive', 'X-Accel-Buffering': 'no' });
           const client = { res, who }; room.clients.add(client); res.write(`event: state\ndata: ${JSON.stringify(state(room, who))}\n\n`);
-          const heartbeat = setInterval(() => res.write(': heartbeat\n\n'), 15000); heartbeat.unref();
+          const heartbeat = setInterval(() => res.write('event: ping\ndata: {}\n\n'), 3000); heartbeat.unref();
           res.on('close', () => { clearInterval(heartbeat); room.clients.delete(client); }); return;
         }
         if (req.method === 'POST' && action === 'answer') {
