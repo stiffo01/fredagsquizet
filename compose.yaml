@@ -1,0 +1,28 @@
+services:
+  quiz:
+    build: .
+    ports:
+      - "${QUIZ_BIND:-0.0.0.0}:${QUIZ_PORT:-8095}:3000"
+    environment:
+      PORT: "3000"
+      DATA_DIR: /app/data
+    volumes:
+      - quiz-data:/app/data
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=16m
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    init: true
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/api/health').then(r => { if (!r.ok) process.exit(1); }).catch(() => process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      start_period: 10s
+      retries: 3
+
+volumes:
+  quiz-data:

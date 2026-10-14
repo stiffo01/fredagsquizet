@@ -1,0 +1,156 @@
+import http from 'node:http';
+import { randomBytes, randomInt, randomUUID, createHash } from 'node:crypto';
+import { mkdirSync, readFileSync, writeFileSync, renameSync } from 'node:fs';
+import { readFile } from 'node:fs/promises';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { sampleQuiz, validateQuiz } from './lib/quiz.mjs';
+
+const baseDir = path.dirname(fileURLToPath(import.meta.url));
+const secret = () => randomBytes(24).toString('base64url');
+const fail = (status, message) => { throw Object.assign(new Error(message), { status }); };
+const ownerHash = token => createHash('sha256').update(token).digest('hex');
+
+export function createApp({ dataDir = process.env.DATA_DIR || path.join(baseDir, 'data'), publicDir = path.join(baseDir, 'public'), roomTtlMs = 6 * 60 * 60 * 1000 } = {}) {
+  mkdirSync(dataDir, { recursive: true });
+  const storePath = path.join(dataDir, 'quizzes.json');
+  let saved = [];
+  try { saved = JSON.parse(readFileSync(storePath, 'utf8')); if (!Array.isArray(saved)) throw new Error('Invalid quiz store'); }
+  catch (error) { if (error.code !== 'ENOENT') throw error; }
+  const rooms = new Map();
+  const persist = next => { writeFileSync(`${storePath}.tmp`, JSON.stringify(next, null, 2), { mode: 0o600 }); renameSync(`${storePath}.tmp`, storePath); saved = next; };
+  const bearer = req => /^Bearer (.+)$/.exec(req.headers.authorization || '')?.[1];
+  const owner = req => { const token = bearer(req); if (!token || token.length < 16 || token.length > 256) fail(401, 'A browser owner token is required.'); return ownerHash(token); };
+  const publicQuiz = ({ owner: ignored, ...quiz }) => quiz;
+  const rank = room => [...room.players.values()].map(p => ({ id: p.id, nickname: p.nickname, score: p.score })).sort((a, b) => b.score - a.score || a.nickname.localeCompare(b.nickname)).map((p, i) => ({ ...p, rank: i + 1 }));
+  const identity = (room, token) => token && token === room.hostToken ? { host: true } : room.players.get(token);
+  const state = (room, who) => {
+    const question = room.quiz.questions[room.index];
+    const result = { pin: room.pin, status: room.status, quizTitle: room.quiz.title, questionIndex: room.index, questionCount: room.quiz.questions.length, players: rank(room), leaderboard: rank(room), answeredCount: [...room.players.values()].filter(p => p.answer !== undefined).length, host: !!who.host };
+    if (question && room.status !== 'lobby') {
+      result.question = { question: question.question, answers: question.answers, timeLimit: question.timeLimit, startedAt: room.startedAt, deadline: room.deadline };
+      if (room.status !== 'question') {
+        result.question.correctIndex = question.correctIndex;
+        result.answerCounts = question.answers.map((_, i) => [...room.players.values()].filter(p => p.answer === i).length);
+      }
+    }
+    if (!who.host) {
+      result.self = { id: who.id, nickname: who.nickname, score: who.score, answered: who.answer !== undefined, answerIndex: who.answer };
+      if (room.status === 'reveal' || room.status === 'finished') { result.self.correct = who.answer !== undefined && who.answer === question?.correctIndex; result.self.points = who.points || 0; }
+    }
+    return result;
+  };
+  const broadcast = room => { for (const client of room.clients) client.res.write(`event: state\ndata: ${JSON.stringify(state(room, client.who))}\n\n`); };
+  const reveal = room => { if (room.status !== 'question') return; clearTimeout(room.timer); for (const p of room.players.values()) p.score += p.points || 0; room.status = 'reveal'; broadcast(room); };
+  const advance = room => {
+    clearTimeout(room.timer);
+    room.index++;
+    if (room.index >= room.quiz.questions.length) { room.index = room.quiz.questions.length - 1; room.status = 'finished'; broadcast(room); return; }
+    for (const p of room.players.values()) { p.answer = undefined; p.points = 0; }
+    room.status = 'question'; room.startedAt = Date.now(); room.deadline = room.startedAt + room.quiz.questions[room.index].timeLimit * 1000;
+    room.timer = setTimeout(() => reveal(room), room.deadline - Date.now()); room.timer.unref(); broadcast(room);
+  };
+  const send = (res, status, data) => { res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' }); res.end(JSON.stringify(data)); };
+  const body = async req => {
+    let text = ''; for await (const chunk of req) { text += chunk; if (Buffer.byteLength(text) > 128 * 1024) fail(413, 'Request too large.'); }
+    try { const parsed = text ? JSON.parse(text) : {}; if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) fail(400, 'Expected a JSON object.'); return parsed; } catch { fail(400, 'Invalid JSON object.'); }
+  };
+  const server = http.createServer(async (req, res) => {
+    try {
+      res.setHeader('X-Content-Type-Options', 'nosniff');
+      res.setHeader('Referrer-Policy', 'no-referrer');
+      const url = new URL(req.url, 'http://localhost');
+      const parts = url.pathname.split('/').filter(Boolean);
+      if (req.method === 'GET' && url.pathname === '/api/health') return send(res, 200, { ok: true });
+      if (parts[0] === 'api' && parts[1] === 'quizzes') {
+        const id = parts[2];
+        if (req.method === 'GET') {
+          const hash = bearer(req) ? owner(req) : null;
+          const quizzes = [sampleQuiz, ...saved.filter(q => q.owner === hash).map(publicQuiz)];
+          if (id) { const quiz = quizzes.find(q => q.id === id); if (!quiz) fail(404, 'Quiz not found.'); return send(res, 200, quiz); }
+          return send(res, 200, quizzes);
+        }
+        const hash = owner(req);
+        if (req.method === 'POST' && !id) { if (saved.filter(q => q.owner === hash).length >= 100) fail(409, 'Quiz library limit reached.'); const quiz = validateQuiz(await body(req)); persist([...saved, { ...quiz, owner: hash }]); return send(res, 201, quiz); }
+        const existing = saved.find(q => q.id === id && q.owner === hash);
+        if (!existing) fail(404, 'Quiz not found.');
+        if (req.method === 'PUT') { const quiz = validateQuiz(await body(req), id); persist(saved.map(q => q === existing ? { ...quiz, owner: hash } : q)); return send(res, 200, quiz); }
+        if (req.method === 'DELETE') { persist(saved.filter(q => q !== existing)); return send(res, 200, { ok: true }); }
+      }
+      if (parts[0] === 'api' && parts[1] === 'rooms') {
+        if (req.method === 'POST' && parts.length === 2) {
+          if (rooms.size >= 1000) fail(503, 'Room limit reached. Try again later.');
+          const input = await body(req);
+          let quiz;
+          if (input.quiz) quiz = validateQuiz(input.quiz);
+          else if (!input.quizId || input.quizId === 'sample') quiz = sampleQuiz;
+          else { const token = bearer(req) || input.ownerToken; quiz = saved.find(q => q.id === input.quizId && token && q.owner === ownerHash(token)); }
+          if (!quiz) fail(404, 'Quiz not found.');
+          let pin; do { pin = String(randomInt(100000, 1000000)); } while (rooms.has(pin));
+          const room = { pin, quiz: structuredClone(quiz), hostToken: secret(), players: new Map(), clients: new Set(), status: 'lobby', index: -1, touchedAt: Date.now() };
+          rooms.set(pin, room); return send(res, 201, { pin, hostToken: room.hostToken });
+        }
+        const room = rooms.get(parts[2]); if (!room) fail(404, 'Game not found. Check your PIN.');
+        const action = parts[3];
+        if (req.method === 'POST' && action === 'join') {
+          if (room.status !== 'lobby') fail(409, 'This game has already started.');
+          if (room.players.size >= 100) fail(409, 'This game is full.');
+          const { nickname } = await body(req);
+          if (room.status !== 'lobby') fail(409, 'This game has already started.');
+          if (room.players.size >= 100) fail(409, 'This game is full.');
+          if (typeof nickname !== 'string' || !nickname.trim() || nickname.trim().length > 24 || /[\u0000-\u001f\u007f]/.test(nickname)) fail(400, 'Choose a nickname of 1–24 characters.');
+          if ([...room.players.values()].some(p => p.nickname.toLowerCase() === nickname.trim().toLowerCase())) fail(409, 'That nickname is already taken.');
+          const playerToken = secret(); room.players.set(playerToken, { id: randomUUID(), nickname: nickname.trim(), score: 0 }); room.touchedAt = Date.now(); broadcast(room); return send(res, 201, { playerToken });
+        }
+        const who = identity(room, bearer(req) || url.searchParams.get('token')); if (!who) fail(401, 'A valid game token is required.');
+        room.touchedAt = Date.now();
+        if (room.status === 'question' && Date.now() >= room.deadline) reveal(room);
+        if (req.method === 'GET' && action === 'state') return send(res, 200, state(room, who));
+        if (req.method === 'GET' && action === 'events') {
+          if ([...room.clients].filter(c => c.who === who || (c.who.host && who.host)).length >= 5) fail(429, 'Too many live connections.');
+          res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache, no-transform', Connection: 'keep-alive', 'X-Accel-Buffering': 'no' });
+          const client = { res, who }; room.clients.add(client); res.write(`event: state\ndata: ${JSON.stringify(state(room, who))}\n\n`);
+          const heartbeat = setInterval(() => res.write(': heartbeat\n\n'), 15000); heartbeat.unref();
+          res.on('close', () => { clearInterval(heartbeat); room.clients.delete(client); }); return;
+        }
+        if (req.method === 'POST' && action === 'answer') {
+          if (who.host) fail(403, 'Only players can answer.');
+          const { answerIndex, questionIndex } = await body(req);
+          if (room.status !== 'question' || Date.now() >= room.deadline) { reveal(room); fail(409, 'Answers are closed.'); }
+          if (questionIndex !== room.index) fail(409, 'This question is no longer active.');
+          if (who.answer !== undefined) fail(409, 'Your answer has already been submitted.');
+          const q = room.quiz.questions[room.index];
+          if (!Number.isInteger(answerIndex) || answerIndex < 0 || answerIndex >= q.answers.length) fail(400, 'Choose a valid answer.');
+          who.answer = answerIndex; who.points = answerIndex === q.correctIndex ? Math.round(500 + 500 * Math.max(0, 1 - (Date.now() - room.startedAt) / (q.timeLimit * 1000))) : 0;
+          if ([...room.players.values()].every(p => p.answer !== undefined)) reveal(room); else broadcast(room);
+          return send(res, 200, { ok: true });
+        }
+        if (req.method === 'POST' && ['start', 'next', 'end'].includes(action)) {
+          if (!who.host) fail(403, 'Only the host can control the game.');
+          if (action === 'start') { if (room.status !== 'lobby') fail(409, 'Game already started.'); if (!room.players.size) fail(409, 'Wait for at least one player.'); advance(room); }
+          if (action === 'next') { if (room.status === 'question') reveal(room); else if (room.status === 'reveal') advance(room); else fail(409, 'No next question available.'); }
+          if (action === 'end') { if (room.status === 'question') reveal(room); clearTimeout(room.timer); room.status = 'finished'; broadcast(room); }
+          return send(res, 200, state(room, who));
+        }
+        fail(404, 'Endpoint not found.');
+      }
+      if (url.pathname.startsWith('/api/')) fail(404, 'Endpoint not found.');
+      if (req.method !== 'GET' && req.method !== 'HEAD') fail(405, 'Method not allowed.');
+      const relative = decodeURIComponent(url.pathname).replace(/^\/+/, '') || 'index.html';
+      const target = path.resolve(publicDir, relative);
+      if (!target.startsWith(path.resolve(publicDir) + path.sep)) fail(403, 'Forbidden.');
+      const types = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.svg': 'image/svg+xml', '.png': 'image/png', '.ico': 'image/x-icon', '.webp': 'image/webp' };
+      let content; try { content = await readFile(target); } catch { fail(404, 'File not found.'); }
+      res.writeHead(200, { 'Content-Type': types[path.extname(target)] || 'application/octet-stream', 'Cache-Control': 'no-cache' }); res.end(req.method === 'HEAD' ? undefined : content);
+    } catch (error) { if (!res.headersSent) send(res, error.status || 500, { error: error.status ? error.message : 'Internal server error.' }); else res.end(); if (!error.status) console.error(error); }
+  });
+  const sweep = setInterval(() => { for (const [pin, room] of rooms) if (Date.now() - room.touchedAt > roomTtlMs) { clearTimeout(room.timer); for (const c of room.clients) c.res.end(); rooms.delete(pin); } }, Math.min(roomTtlMs, 60000)); sweep.unref();
+  const close = async () => { clearInterval(sweep); for (const room of rooms.values()) { clearTimeout(room.timer); for (const c of room.clients) c.res.end(); } server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); };
+  return { server, close };
+}
+
+if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  const app = createApp(); const port = Number(process.env.PORT || 3000);
+  app.server.listen(port, '0.0.0.0', () => console.log(`Quiz live at http://localhost:${port}`));
+  for (const signal of ['SIGINT', 'SIGTERM']) process.on(signal, async () => { await app.close(); process.exit(0); });
+}
