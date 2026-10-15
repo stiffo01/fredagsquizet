@@ -98,6 +98,7 @@ try {
   await host.click('[data-action=start]'); await host.wait('!!document.querySelector(".preview-note")');
   assert.equal(await alice.evaluate('document.querySelector("#answer-map")'),null);
   await alice.wait('!!document.querySelector("#map-answer-form")'); await bob.wait('!!document.querySelector("#map-answer-form")');
+  await host.wait('!!document.querySelector("#answer-map")');
   await alice.call('Emulation.setDeviceMetricsOverride',{width:390,height:844,deviceScaleFactor:1,mobile:true});
   assert.equal(await alice.evaluate('document.documentElement.scrollWidth <= innerWidth'),true);
   await alice.evaluate(`quizMaps[0].map.fire('click',{latlng:L.latLng(0,1)}); quizMaps[0].map.setView([0,1],6,{animate:false}); void 0;`);
@@ -108,6 +109,8 @@ try {
   await alice.evaluate(`document.querySelector('#map-answer-form').requestSubmit()`);
   await alice.wait('document.body.innerText.includes("+889 points")');
   await bob.wait('document.body.innerText.includes("+1000 points")');
+  await host.wait('document.querySelector(".room [data-action=next]")?.textContent.includes("Show podium") && document.querySelectorAll(".room .quiz-map-pin").length === 1');
+  assert.deepEqual(host.exceptions,[],'host must render the target pin after all players lock in');
   assert.equal(await alice.evaluate('document.querySelectorAll(".quiz-map-pin").length'),2);
   for (const p of [host,alice,bob]) {
     assert.deepEqual(p.exceptions,[]);
@@ -132,7 +135,7 @@ try {
   assert.deepEqual(fallback.point,{lat:59,lng:18});
   assert.match(fallback.message,/WebGL/);
   assert.equal((await fetch(origin)).headers.get('referrer-policy'),'no-referrer','other resources keep the existing privacy policy');
-  console.log('PASS: Map editor, saving, preview secrecy, two players, pending pin and zoom preservation, distance reveal, mobile layout, OpenFreeMap provider and attribution. Styles mocked; no OSM tile requests or screenshots captured.');
+  console.log('PASS: Map editor, saving, preview secrecy, two players, host target-pin reveal, pending pin and zoom preservation, distance reveal, mobile layout, OpenFreeMap provider and attribution. Styles mocked; no OSM tile requests or screenshots captured.');
   }
 } catch (error) {
   console.error(error); throw error;

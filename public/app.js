@@ -494,9 +494,9 @@ function questionContent(s) {
   if (preview) return `${heading}<div class="preview-note"><span class="badge">TAKE A LOOK</span>${s.previewEndsAt ? '<div class="preview-countdown"><span>Answers in</span><strong id="preview-countdown">5</strong></div>' : '<p>Read the question and study the picture. Answers will open when the host is ready.</p>'}</div>${host ? `<button class="btn light${mapPin ? ' map-host-action' : ''}" data-action="open">Open answers →</button>` : ''}`;
   let controls;
   if (mapPin) {
-    const editable = !host && !reveal && !s.self.answered;
+    const editable = !host && !reveal && !s.self?.answered;
     const pendingKey = `${s.pin}:${s.questionIndex}`;
-    const hasPin = !!s.self.answerLocation || pendingPins.has(pendingKey);
+    const hasPin = !!s.self?.answerLocation || pendingPins.has(pendingKey);
     controls = `<div class="map-answer"><p class="visually-hidden">${reveal ? 'Correct location and your pin.' : editable ? 'Tap the map to place your pin. Pan and zoom to refine it, then lock it in.' : host ? 'Players are placing their pins.' : 'Pin locked in. Waiting for the reveal.'}</p><div id="answer-map" class="quiz-map" aria-label="Answer map"></div><p class="map-status" data-map-status role="status"></p>${editable ? `<form id="map-answer-form" class="map-answer-controls">${locationFields(s.self.answerLocation)}<button class="btn primary map-coordinate-toggle" type="button" aria-expanded="false">Enter coordinates</button><button class="btn primary map-lock-button" type="submit" ${hasPin ? '' : 'disabled'}>Lock in pin →</button></form>` : ''}</div>`;
   } else if (typed) {
     controls = reveal ? `<div class="feedback">Accepted answers: ${q.acceptedAnswers.map(escapeHTML).join(' · ')}</div>` : host ? '<p class="waiting-answer">Players are typing their answers…</p>' : s.self.answered ? '<p class="waiting-answer">Answer locked in. Fingers crossed!</p>' : `<form id="typed-answer-form" class="card typed-answer"><label class="field" for="typed-answer">Your answer</label><input class="input" id="typed-answer" data-question-index="${s.questionIndex}" maxlength="200" required autocomplete="off" placeholder="Type your answer…"><button class="btn primary wide" type="submit">Lock in answer →</button></form>`;
