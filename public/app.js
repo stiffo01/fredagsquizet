@@ -42,12 +42,102 @@ async function run(button, action) {
   try { await action(); } catch (error) { toast(error.message); }
   finally { if (button?.isConnected) button.disabled = false; }
 }
+let qrStream, qrFrame;
+function closeQrScanner() {
+  cancelAnimationFrame(qrFrame);
+  qrFrame = undefined;
+  qrStream?.getTracks().forEach(track => track.stop());
+  qrStream = undefined;
+  document.querySelector('.qr-scanner')?.remove();
+}
+function pinFromQr(text) {
+  const value = text.trim();
+  if (/^\d{6}$/.test(value)) return value;
+  try {
+    const url = new URL(value);
+    const match = /^#join\/(\d{6})$/.exec(url.hash);
+    return url.origin === location.origin ? match?.[1] || null : null;
+  } catch { return null; }
+}
 function joinPage(pin='') {
-  app.innerHTML = `<section class="join"><p class="eyebrow">Big questions. Good company.</p><h1 class="hero-logo">Fredags<span>quizet</span></h1><p class="subtitle">Gather your people.<br>Let the game begin.</p><form class="card" id="join-form"><label class="field" for="pin">Got a game PIN?</label><input class="input pin-input" id="pin" name="pin" inputmode="numeric" autocomplete="off" pattern="[0-9]{6}" maxlength="6" placeholder="Game PIN" value="${escapeHTML(pin)}" required aria-label="Six-digit game PIN"><button class="btn wide" type="submit">Enter <span aria-hidden="true">→</span></button></form><p class="join-note">Bringing everyone together? <a href="/host#host">Host a quiz</a></p><div class="shape-row" aria-hidden="true"><span>▲</span><span>◆</span><span>●</span><span>■</span></div><p class="small muted-white">One screen to host. Any device to play.</p></section>`;
+  app.innerHTML = `<section class="join"><p class="eyebrow">Big questions. Good company.</p><h1 class="hero-logo">Fredags<span>quizet</span></h1><p class="subtitle">Gather your people.<br>Let the game begin.</p><form class="card" id="join-form"><label class="field" for="pin">Got a game PIN?</label><input class="input pin-input" id="pin" name="pin" inputmode="numeric" autocomplete="off" pattern="[0-9]{6}" maxlength="6" placeholder="Game PIN" value="${escapeHTML(pin)}" required aria-label="Six-digit game PIN"><button class="btn wide" type="submit">Enter <span aria-hidden="true">→</span></button><button class="btn subtle wide" id="scan-qr" type="button">Scan a QR code</button><button class="btn subtle wide" id="choose-qr-image" type="button" hidden>Choose a QR code image</button><input id="scan-qr-file" type="file" accept="image/*" capture="environment" hidden><p class="scan-status small" id="scan-status" role="status" aria-live="polite"></p></form><p class="join-note">Bringing everyone together? <a href="/host#host">Host a quiz</a></p><div class="shape-row" aria-hidden="true"><span>▲</span><span>◆</span><span>●</span><span>■</span></div><p class="small muted-white">One screen to host. Any device to play.</p></section>`;
   document.querySelector('#join-form').onsubmit = event => {
     event.preventDefault(); const pin = document.querySelector('#pin').value.trim();
     nicknamePage(pin);
   };
+  const picker = document.querySelector('#scan-qr-file');
+  document.querySelector('#scan-qr').onclick = () => { void startQrScanner(picker); };
+  document.querySelector('#choose-qr-image').onclick = () => { picker.value = ''; picker.click(); };
+  picker.onchange = async () => {
+    const file = picker.files?.[0]; if (!file) return;
+    const status = document.querySelector('#scan-status');
+    try {
+      const bitmap = await createImageBitmap(file);
+      const scale = Math.min(1, 1600 / Math.max(bitmap.width, bitmap.height));
+      const canvas = document.createElement('canvas');
+      canvas.width = Math.max(1, Math.round(bitmap.width * scale)); canvas.height = Math.max(1, Math.round(bitmap.height * scale));
+      canvas.getContext('2d', {willReadFrequently:true}).drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+      bitmap.close();
+      const code = jsQR(canvas.getContext('2d', {willReadFrequently:true}).getImageData(0,0,canvas.width,canvas.height).data, canvas.width, canvas.height, {inversionAttempts:'attemptBoth'});
+      if (!code) { status.textContent = 'No QR code found. Try again with the whole code in focus.'; return; }
+      const pin = pinFromQr(code.data);
+      if (!pin) { status.textContent = 'That QR code is not a Fredagsquizet game invite.'; return; }
+      nicknamePage(pin);
+    } catch (error) {
+      status.textContent = error.name === 'SecurityError' ? 'This image cannot be read. Save it to your device and try again.' : 'Could not read that image. Try another QR code image.';
+    }
+  };
+}
+async function startQrScanner(picker) {
+  if (!navigator.mediaDevices?.getUserMedia) { picker.value = ''; picker.click(); return; }
+  let video, canvas, scanning = false, lastScanAt = 0;
+  const showFilePicker = message => {
+    closeQrScanner();
+    const status = document.querySelector('#scan-status');
+    const chooseImage = document.querySelector('#choose-qr-image');
+    if (status) status.textContent = message;
+    if (chooseImage) chooseImage.hidden = false;
+  };
+  try {
+    qrStream = await navigator.mediaDevices.getUserMedia({video:{facingMode:{ideal:'environment'}},audio:false});
+    const panel = document.createElement('section');
+    panel.className = 'qr-scanner';
+    panel.innerHTML = '<div class="qr-scanner-panel"><p class="field">Point your camera at the game QR code</p><video autoplay playsinline muted></video><p data-qr-scanner-status class="small" role="status">Looking for a QR code…</p><button class="btn subtle" type="button" data-close-qr>Cancel</button></div>';
+    app.append(panel);
+    panel.querySelector('[data-close-qr]').onclick = closeQrScanner;
+    video = panel.querySelector('video');
+    video.srcObject = qrStream;
+    canvas = document.createElement('canvas');
+    const context = canvas.getContext('2d',{willReadFrequently:true});
+    const detect = async () => {
+      if (!video.isConnected || !qrStream) return;
+      qrFrame = requestAnimationFrame(detect);
+      if (scanning || video.readyState < HTMLMediaElement.HAVE_CURRENT_DATA || Date.now()-lastScanAt<120) return;
+      scanning = true; lastScanAt=Date.now();
+      try {
+        let value;
+        if ('BarcodeDetector' in window) {
+          const detector = new BarcodeDetector({formats:['qr_code']});
+          value = (await detector.detect(video))[0]?.rawValue;
+        } else {
+          const scale = Math.min(1,720 / video.videoWidth);
+          canvas.width = Math.max(1,Math.round(video.videoWidth * scale));
+          canvas.height = Math.max(1,Math.round(video.videoHeight * scale));
+          context.drawImage(video,0,0,canvas.width,canvas.height);
+          value = jsQR(context.getImageData(0,0,canvas.width,canvas.height).data,canvas.width,canvas.height,{inversionAttempts:'attemptBoth'})?.data;
+        }
+        if (value) {
+          const pin = pinFromQr(value);
+          if (pin) { closeQrScanner(); nicknamePage(pin); }
+          else panel.querySelector('[data-qr-scanner-status]').textContent = 'That QR code is not a Fredagsquizet game invite.';
+        }
+      } catch { /* Keep scanning; browsers may fail to decode a blurry frame. */ }
+      finally { scanning = false; }
+    };
+    video.onloadeddata = detect;
+  } catch {
+    showFilePicker('Camera access is unavailable here. Take or choose a picture of the QR code.');
+  }
 }
 function nicknamePage(pin) {
   let selectedEmoji = playerEmojis[0];
@@ -513,6 +603,7 @@ function updateTimer() {
   const progress=document.querySelector('#time-progress');if(progress)progress.style.width=`${remaining/(roomState.question.timeLimit*1000)*100}%`;
 }
 async function route() {
+  closeQrScanner();
   clearQuizMaps();
   const version=++routeVersion;stream?.close();stream=null;clearInterval(timer);roomSyncCleanup?.();roomSyncCleanup=null;clearInterval(statePoll);statePoll=null;roomState=null;
   const [page,arg,pin]=location.hash.slice(1).split('/');

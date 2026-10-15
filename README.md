@@ -21,7 +21,7 @@ Open **http://localhost:8093** on the server machine. For a shared game, the hos
 
 1. Open the host area at `/host` and sign in with the configured Basic Auth credentials. Host the shared Feature test quiz to try the game, or create a quiz.
 2. Host the quiz and share its six-digit PIN.
-3. Players open the same site, enter the PIN, and choose a nickname and emoji.
+3. Players open the same site, scan the host’s join QR code or enter the PIN, and choose a nickname and emoji. On phones, **Scan a QR code** opens the camera or image picker; on computers, choose an image containing the QR code.
 4. Start after players join, then advance through the results and questions.
 
 The built-in Feature test quiz is available to every host and demonstrates question previews, default artwork, true/false, typed answers, map pins, polls, and scoring. The Curiosity quiz can be removed from each host's library independently.
