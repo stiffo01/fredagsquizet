@@ -8,7 +8,7 @@ import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import QRCode from 'qrcode';
-import { sampleQuiz, featureTestQuiz, validateQuiz, normalizeAnswer, mediaPathPattern, playerEmojis } from './lib/quiz.mjs';
+import { sampleQuiz, featureTestQuiz, validateQuiz, validLocation, distanceKm, mapPoints, normalizeAnswer, mediaPathPattern, playerEmojis } from './lib/quiz.mjs';
 
 const baseDir = path.dirname(fileURLToPath(import.meta.url));
 const secret = () => randomBytes(24).toString('base64url');
@@ -106,6 +106,7 @@ export function createApp({ dataDir = process.env.DATA_DIR || path.join(baseDir,
         result.question.revealImage = question.revealImage || '';
         result.question.revealImageAlt = question.revealImageAlt || '';
       }
+      if (question.type === 'map-pin') result.question.maxDistanceKm = question.maxDistanceKm;
       if (room.status !== 'preview') {
         result.question.answers = question.answers;
         result.question.startedAt = room.startedAt;
@@ -114,13 +115,14 @@ export function createApp({ dataDir = process.env.DATA_DIR || path.join(baseDir,
       if (room.status === 'reveal' || room.status === 'finished') {
         result.question.acceptedAnswers = question.acceptedAnswers;
         result.question.correctIndex = question.correctIndex;
+        result.question.target = question.target;
         result.answerCounts = question.answers?.map((_, i) => [...room.players.values()].filter(p => p.answer === i).length);
       }
     }
     if (room.status === 'preview' && room.previewEndsAt) result.previewEndsAt = room.previewEndsAt;
     if (!who.host) {
-      result.self = { id: who.id, nickname: who.nickname, emoji: who.emoji, score: who.score, answered: who.answer !== undefined, ...(typeof who.answer === 'number' ? {answerIndex: who.answer} : {answerText: who.answer}) };
-      if (room.status === 'reveal' || room.status === 'finished') { result.self.correct = who.answer !== undefined && who.correct === true; result.self.points = who.points || 0; }
+      result.self = { id: who.id, nickname: who.nickname, emoji: who.emoji, score: who.score, answered: who.answer !== undefined, ...(question?.type === 'map-pin' ? {answerLocation: who.answer} : typeof who.answer === 'number' ? {answerIndex: who.answer} : {answerText: who.answer}) };
+      if (room.status === 'reveal' || room.status === 'finished') { result.self.correct = who.answer !== undefined && who.correct === true; result.self.points = who.points || 0; if (question?.type === 'map-pin' && who.answer !== undefined) result.self.distanceKm = who.distanceKm; }
     }
     return result;
   };
@@ -150,7 +152,7 @@ export function createApp({ dataDir = process.env.DATA_DIR || path.join(baseDir,
     room.previewEndsAt = undefined;
     room.index++;
     if (room.index >= room.quiz.questions.length) { room.index = room.quiz.questions.length - 1; room.status = 'finished'; room.scoreboardVisible = false; room.scoreboardShownAt = undefined; room.scoreboardDeleted = false; broadcast(room); return; }
-    for (const p of room.players.values()) { p.answer = undefined; p.points = 0; p.correct = false; }
+    for (const p of room.players.values()) { p.answer = undefined; p.points = 0; p.correct = false; p.distanceKm = undefined; }
     showPreview(room, true);
   };
   const openAnswers = room => {
@@ -277,19 +279,24 @@ export function createApp({ dataDir = process.env.DATA_DIR || path.join(baseDir,
         }
         if (req.method === 'POST' && action === 'answer') {
           if (who.host) fail(403, 'Only players can answer.');
-          const { answerIndex, answerText, questionIndex } = await body(req);
+          const { answerIndex, answerText, answerLocation, questionIndex } = await body(req);
           if (room.status !== 'question' || Date.now() >= room.deadline) { reveal(room); fail(409, 'Answers are closed.'); }
           if (questionIndex !== room.index) fail(409, 'This question is no longer active.');
           if (who.answer !== undefined) fail(409, 'Your answer has already been submitted.');
           const q = room.quiz.questions[room.index];
-          if (q.type === 'type-answer') {
+          if (q.type === 'map-pin') {
+            if (!validLocation(answerLocation)) fail(400, 'Choose a valid location on the map.');
+            who.answer = { lat: answerLocation.lat, lng: answerLocation.lng };
+            who.distanceKm = distanceKm(who.answer, q.target);
+            who.correct = mapPoints(who.distanceKm, q.maxDistanceKm) === 1000;
+          } else if (q.type === 'type-answer') {
             if (typeof answerText !== 'string' || !answerText.trim() || answerText.length > 200) fail(400, 'Type an answer of 1–200 characters.');
             who.answer = answerText.trim(); who.correct = q.acceptedAnswers.some(a => normalizeAnswer(a) === normalizeAnswer(answerText));
           } else {
             if (!Number.isInteger(answerIndex) || answerIndex < 0 || answerIndex >= q.answers.length) fail(400, 'Choose a valid answer.');
             who.answer = answerIndex; who.correct = q.type !== 'poll' && answerIndex === q.correctIndex;
           }
-          who.points = who.correct ? Math.round(500 + 500 * Math.max(0, 1 - (Date.now() - room.startedAt) / (q.timeLimit * 1000))) : 0;
+          who.points = q.type === 'map-pin' ? mapPoints(who.distanceKm, q.maxDistanceKm) : who.correct ? Math.round(500 + 500 * Math.max(0, 1 - (Date.now() - room.startedAt) / (q.timeLimit * 1000))) : 0;
           if (who.correct) who.correctAnswers++;
           if ([...room.players.values()].every(p => p.answer !== undefined)) reveal(room); else broadcast(room);
           return send(res, 200, { ok: true });

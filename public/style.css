@@ -19,3 +19,11 @@
 .editor-games{padding:18px;border:1px solid #ffffff35;border-radius:12px;background:#ffffff0b}.editor-games .game-admin-grid{grid-template-columns:1fr}.editor-games .game-admin-card{box-shadow:none}
 .playing-game header{display:none}@media(min-width:701px){.playing-game header{display:flex}}
 .playing-game .github-corner{display:none}
+
+.quiz-map { height: min(55vh, 440px); min-height: 280px; width: 100%; border-radius: 12px; z-index: 0; background: #dcebf0; color: #202037; }
+.quiz-map-pin { font-size: 28px; line-height: 36px; }
+.map-answer { text-align: left; margin: 20px 0; }
+.map-coordinates { display: flex; gap: 16px; margin: 16px 0; }
+.map-coordinates label { flex: 1; min-width: 0; }
+.quiz-map:focus-visible { outline: 3px solid #ffb900; outline-offset: 3px; }
+.quiz-map .leaflet-control-attribution { font-size: 11px; }

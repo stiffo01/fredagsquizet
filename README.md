@@ -24,7 +24,7 @@ Open **http://localhost:8093** on the server machine. For a shared game, the hos
 3. Players open the same site, enter the PIN, and choose a nickname and emoji.
 4. Start after players join, then advance through the results and questions.
 
-The built-in Feature test quiz is available to every host and demonstrates question previews, default artwork, true/false, typed answers, polls, and scoring. The Curiosity quiz can be removed from each host's library independently.
+The built-in Feature test quiz is available to every host and demonstrates question previews, default artwork, true/false, typed answers, map pins, polls, and scoring. The Curiosity quiz can be removed from each host's library independently.
 
 The default binding is all network interfaces so players can join over LAN. Set `QUIZ_BIND=127.0.0.1` for access only from this computer. This app is intended for trusted local networks; use a TLS reverse proxy and appropriate access controls before any Internet deployment.
 
@@ -73,6 +73,7 @@ In **Create quiz** or **Edit**, choose a question type for each question:
 - **Multiple choice:** choose one correct answer from 2–4 choices.
 - **True or false:** two fixed choices; select the correct one.
 - **Type an answer:** enter up to 10 accepted answers, one per line. Players type their response. Matching ignores capitalization and extra whitespace, with Unicode normalization; punctuation still matters.
+- **Pin on a map:** choose the target by clicking the map or entering coordinates. Players pan, zoom, place a pin, and lock it in. Great-circle distance determines the score: `round(1000 × max(0, 1 − distance / zero-point distance))`, with no speed bonus. Set the zero-point distance from 1–20,000 km (default 2,000 km). The target stays hidden until reveal; players then see both pins, their distance, and points. Only a full 1,000-point pin counts as correct in the final tally. Map tiles require internet access and are provided by [OpenStreetMap](https://operations.osmfoundation.org/policies/tiles/), using bundled [Leaflet 1.9.4](https://leafletjs.com/reference.html).
 - **Poll:** players vote on one choice. Results show vote counts; this round awards no points and has no leaderboard. A quiz containing only polls has no final winner.
 
 Enter an optional creator name near the quiz title to identify who made it; all authenticated hosts see that name on its library card. Use **Upload cover picture** near the title to add an image shown on that quiz's library card. Use **Upload picture** under a question heading to add an image for that question. Both accept PNG, JPEG, WebP, or GIF (maximum 50 MB; the editor accepts up to 30 megapixels). You can also paste a public image URL, load it, and crop it to a landscape, square, or wide frame. Add a description for accessibility. Pictures can be replaced or removed in the editor. Quiz edits save automatically as you work; incomplete drafts are kept in the same browser and sync to the server once the required fields are valid.
@@ -92,3 +93,5 @@ Questions without an uploaded or URL-imported picture automatically show origina
 The application and Compose service are named **Fredagsquizet** (`fredagsquizet` in Compose). Existing browser ownership/session keys and the `quiz-data` volume remain unchanged so the rename preserves saved quizzes.
 
 Basic Auth settings are read from `HOST_USERNAME` and `HOST_PASSWORD`. Change them in `.env` and recreate the container to rotate credentials. The local `.env` file is ignored by Git; keep it private.
+
+Run `npm run test:map-browser` for the DOM-only map editor and two-player gameplay test (requires Chromium). No screen captures are taken.

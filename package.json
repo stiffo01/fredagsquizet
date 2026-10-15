@@ -10,7 +10,8 @@
   "scripts": {
     "start": "node server.mjs",
     "test": "node --test test/backend.test.mjs",
-    "test:browser": "node test/browser-smoke.mjs"
+    "test:browser": "node test/browser-smoke.mjs",
+    "test:map-browser": "node test/map-browser.mjs"
   },
   "dependencies": {
     "qrcode": "^1.5.4"

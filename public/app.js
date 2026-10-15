@@ -15,7 +15,7 @@ const randomToken = () => Array.from(crypto.getRandomValues(new Uint8Array(24)),
 let ownerToken = localStorage.getItem('quizpop-owner');
 if (!ownerToken) { ownerToken = randomToken(); localStorage.setItem('quizpop-owner', ownerToken); }
 let stream, roomState, session, timer, streamWatchdog, statePoll, streamLastSignal = 0, autosaveTimer, autosaveTask, autosavePending = false, quizzes = [], draft, routeVersion = 0, playerAnswerOnly = false;
-const questionTypes = {'quiz':'Multiple choice', 'true-false':'True or false', 'type-answer':'Type an answer', 'poll':'Poll'};
+const questionTypes = {'quiz':'Multiple choice', 'true-false':'True or false', 'type-answer':'Type an answer', 'poll':'Poll', 'map-pin':'Pin on a map'};
 const playerEmojis = ['😀', '😎', '🤓', '🥳', '🐸', '🦊', '🐼', '🐙', '🦄', '🐧', '🐢', '🦖', '🍕', '🚀', '⭐', '👾'];
 const newQuestion = () => ({type:'quiz', question:'', image:'', imageAlt:'', revealImage:'', revealImageAlt:'', showRevealImage:false, answers:['','','',''], correctIndex:0, timeLimit:20});
 function toast(message) { const el = document.querySelector('#toast'); el.textContent = message; el.hidden = false; clearTimeout(toast.timeout); toast.timeout = setTimeout(() => el.hidden = true, 6000); }
@@ -88,6 +88,8 @@ function readDraft() {
     showRevealImage: el.querySelector('[data-reveal-image]')?.checked || false,
     answers: [...el.querySelectorAll('[data-answer]')].map(input => input.value),
     acceptedAnswers: (el.querySelector('[data-accepted]')?.value || '').split('\n').map(answer => answer.trim()).filter(Boolean),
+    target: readLocation(el),
+    maxDistanceKm: Number(el.querySelector('[data-map-distance]')?.value || 2000),
     correctIndex: Number(el.querySelector('input[type=radio]:checked')?.value || 0),
     timeLimit: Number(el.querySelector('[data-time]').value)
   }));
@@ -105,6 +107,7 @@ function restoreDraft(value) {
 function draftIsComplete(value) {
   return !!value.title?.trim() && value.title.length <= 120 && value.questions.length > 0 && value.questions.length <= 50 && value.questions.every(q => {
     if (!q.question?.trim() || q.question.length > 500 || q.timeLimit < 1 || q.timeLimit > 120) return false;
+    if (q.type === 'map-pin') return !!q.target && Number.isFinite(q.maxDistanceKm) && q.maxDistanceKm >= 1 && q.maxDistanceKm <= 20000;
     if (q.type === 'type-answer') return q.acceptedAnswers?.length > 0 && q.acceptedAnswers.length <= 10 && q.acceptedAnswers.every(answer => answer.length <= 200);
     return q.answers?.length >= 2 && q.answers.length <= 4 && q.answers.every(answer => answer.trim() && answer.length <= 200) && (q.type === 'poll' || q.correctIndex < q.answers.length);
   });
@@ -210,7 +213,9 @@ function openCropper(source, target, uploadPicture) {
 function editorQuestion(q, i) {
   const type = q.type || 'quiz';
   let answers;
-  if (type === 'type-answer') {
+  if (type === 'map-pin') {
+    answers = `<p>Choose the correct location. Click or tap to place the pin, or use arrow keys to pan and Enter to pin the map centre.</p><div class="quiz-map" data-editor-map="${i}" aria-label="Correct location map"></div><p class="small" data-map-status role="status"></p>${locationFields(q.target)}<label class="field">Distance for zero points (km)<input class="input" data-map-distance type="number" min="1" max="20000" step="any" required value="${escapeHTML(q.maxDistanceKm || 2000)}"></label><p class="small">Up to 1,000 points for accuracy. Points decrease evenly to zero at this distance. No speed bonus.</p>`;
+  } else if (type === 'type-answer') {
     answers = `<label class="field" for="accepted-${i}">Accepted answers (one per line)</label><textarea class="input" id="accepted-${i}" data-accepted rows="3" required placeholder="Stockholm\nStockholm city">${escapeHTML((q.acceptedAnswers || ['']).join('\n'))}</textarea><p class="small">Up to 10 accepted spellings. Capitalization and extra spaces are ignored.</p>`;
   } else {
     answers = `<div class="answer-inputs">${q.answers.map((answer, j) => `<div class="answer-edit">${type !== 'poll' ? `<input type="radio" name="correct-${i}" value="${j}" ${q.correctIndex === j ? 'checked' : ''} aria-label="Mark answer ${j + 1} correct">` : ''}<span aria-hidden="true">${type === 'true-false' ? ['✓','✕'][j] : symbols[j]}</span><input class="input" data-answer required maxlength="200" placeholder="Answer ${j + 1}" aria-label="Question ${i + 1}, answer ${j + 1}" value="${escapeHTML(answer)}" ${type === 'true-false' ? 'readonly' : ''}></div>`).join('')}</div><p class="small">${type === 'poll' ? 'Everyone gets a vote. No correct answer and no points.' : 'Select the circle beside the correct answer.'}</p>`;
@@ -240,7 +245,13 @@ async function refreshQuizGames(quizId, version) {
   } catch (error) { if (version === routeVersion && section.isConnected) { const message=section.querySelector('.games-empty') || document.createElement('p'); message.className='small games-empty'; message.textContent=error.message; if(!message.isConnected)section.append(message); } }
 }
 function editor() {
+  clearQuizMaps();
   app.innerHTML = `<section class="shell editor"><div class="topline"><div><p class="eyebrow">Make it your own</p><h1>${draft.id ? 'Edit your quiz' : 'A great game starts here.'}</h1><p>Mix question types, add pictures, and set the pace.</p></div><a class="btn ghost" href="/host#host">Back to library</a></div>${draft.id ? '<section class="games-admin editor-games" id="quiz-games"><div class="games-admin-title"><h2>Games and scoreboards for this quiz</h2><button class="btn ghost" id="refresh-quiz-games">Refresh</button></div><p class="small games-empty">Loading games…</p></section>' : ''}<form id="editor-form"><label class="field" for="quiz-title">Quiz title</label><input class="input editor-title" id="quiz-title" placeholder="Give your quiz a name" maxlength="120" required value="${escapeHTML(draft.title)}"><label class="field" for="quiz-creator">Creator name <span class="small">(optional)</span></label><input class="input" id="quiz-creator" placeholder="Who created this quiz?" maxlength="80" value="${escapeHTML(draft.creator || '')}"><section class="card image-editor quiz-cover-editor"><h2 class="question-heading">Quiz cover picture</h2>${draft.coverImage ? `<img class="editor-cover" src="${escapeHTML(draft.coverImage)}" alt="${escapeHTML(draft.coverImageAlt || 'Quiz cover picture')}"><button class="btn subtle" type="button" data-remove-cover>Remove cover picture</button>` : `<img class="default-image" src="/images/quiz.svg" alt="Colourful quiz-themed cover"><p class="small">Standard quiz artwork is used on the library card until you add a cover.</p>`}<label class="field" for="cover-image">${draft.coverImage ? 'Replace cover picture' : 'Upload cover picture'}</label><input class="input" id="cover-image" type="file" accept="image/png,image/jpeg,image/webp,image/gif" data-cover-image><p class="small">PNG, JPEG, WebP or GIF · up to 50 MB.</p>${pictureUrlControls('cover')}${draft.coverImage ? `<label class="field" for="cover-alt">Picture description</label><input class="input" id="cover-alt" data-cover-alt maxlength="200" placeholder="Describe the cover picture" value="${escapeHTML(draft.coverImageAlt || '')}">` : ''}</section>${draft.questions.map(editorQuestion).join('')}<div class="savebar"><button class="btn ghost" id="add-question" type="button" ${draft.questions.length >= 50 ? 'disabled' : ''}>＋ Add question</button><span class="small" id="save-status" role="status" aria-live="polite">${draftIsComplete(draft) ? 'Changes will save automatically' : 'Your work is saved on this device as you type'}</span><button class="btn light" type="submit">Save quiz ✓</button></div></form></section>`;
+  app.querySelectorAll('[data-editor-map]').forEach(element => {
+    const i = Number(element.dataset.editorMap), container = element.closest('.question-editor');
+    const widget = mountQuizMap(element, {key:`editor:${draft.id || 'new'}:${i}`, point:draft.questions[i].target, onSelect:point => { setLocationFields(container, point); scheduleDraftSave(); }});
+    wireLocationFields(container, widget);
+  });
   if (draft.id) refreshQuizGames(draft.id, routeVersion);
   const form = document.querySelector('#editor-form');
   form.addEventListener('input', scheduleDraftSave);
@@ -348,24 +359,30 @@ function updateScoreboardReveal() {
 function questionContent(s) {
   const q = s.question, host = s.host, preview = s.status === 'preview', reveal = s.status === 'reveal';
   const answerOnly = !host && playerAnswerOnly && s.status === 'question';
+  const mapPin = q.type === 'map-pin';
   const typed = q.type === 'type-answer', poll = q.type === 'poll';
   const image = `<figure class="question-picture"><img src="${escapeHTML(q.image || defaultPicture(q))}" alt="${escapeHTML(q.image ? q.imageAlt || 'Question picture' : 'Colourful quiz illustration')}"></figure>`;
   const revealImage = reveal && q.revealImage ? `<figure class="question-picture explanation-picture"><figcaption>More context</figcaption><img src="${escapeHTML(q.revealImage)}" alt="${escapeHTML(q.revealImageAlt || 'Answer explanation picture')}"></figure>` : '';
   const heading = `<p class="eyebrow">${escapeHTML(questionTypes[q.type] || questionTypes.quiz)} · Question ${s.questionIndex + 1} of ${s.questionCount}</p><h1>${escapeHTML(q.question)}</h1>${image}`;
   if (preview) return `${heading}<div class="preview-note"><span class="badge">TAKE A LOOK</span>${s.previewEndsAt ? '<div class="preview-countdown"><span>Answers in</span><strong id="preview-countdown">5</strong></div>' : '<p>Read the question and study the picture. Answers will open when the host is ready.</p>'}</div>${host && !s.previewEndsAt ? '<button class="btn light" data-action="open">Open answers →</button>' : ''}`;
   let controls;
-  if (typed) {
+  if (mapPin) {
+    const editable = !host && !reveal && !s.self.answered;
+    controls = `<div class="card map-answer"><p>${reveal ? '🎯 Correct location · 📍 Your pin' : editable ? 'Tap the map to place your pin. Pan and zoom to refine it, then lock it in.' : host ? 'Players are placing their pins…' : 'Pin locked in. Waiting for the reveal…'}</p><p class="small">1,000 points at the target, decreasing to 0 at ${q.maxDistanceKm.toLocaleString()} km. No speed bonus.</p><div id="answer-map" class="quiz-map" aria-label="Answer map"></div><p class="small" data-map-status role="status"></p>${editable ? `<form id="map-answer-form">${locationFields(s.self.answerLocation)}<p class="small">Keyboard: arrow keys pan, +/− zoom, Enter places a pin at the centre. You can also enter coordinates.</p><button class="btn primary" type="submit">Lock in pin →</button></form>` : ''}</div>`;
+  } else if (typed) {
     controls = reveal ? `<div class="feedback">Accepted answers: ${q.acceptedAnswers.map(escapeHTML).join(' · ')}</div>` : host ? '<p class="waiting-answer">Players are typing their answers…</p>' : s.self.answered ? '<p class="waiting-answer">Answer locked in. Fingers crossed!</p>' : `<form id="typed-answer-form" class="card typed-answer"><label class="field" for="typed-answer">Your answer</label><input class="input" id="typed-answer" data-question-index="${s.questionIndex}" maxlength="200" required autocomplete="off" placeholder="Type your answer…"><button class="btn primary wide" type="submit">Lock in answer →</button></form>`;
   } else {
     controls = `<div class="answers ${q.type === 'true-false' ? 'true-false' : ''}">${q.answers.map((answer, i) => `<button class="answer ${reveal && !poll ? (i === q.correctIndex ? 'correct' : 'dim') : ''} ${s.self?.answerIndex === i ? 'selected' : ''}" data-answer-index="${i}" ${host || reveal || s.self?.answered ? 'disabled' : ''}><span class="symbol" aria-hidden="true">${q.type === 'true-false' ? ['✓','✕'][i] : symbols[i]}</span><span>${escapeHTML(answer)}${reveal && !poll && i === q.correctIndex ? ' ✓' : ''}${reveal ? ` <small>(${s.answerCounts?.[i] ?? 0}${poll ? ' votes' : ''})</small>` : ''}</span></button>`).join('')}</div>${!host && !reveal && s.self.answered ? `<p class="waiting-answer">${poll ? 'Vote recorded. Waiting for everyone…' : 'Answer locked in. Fingers crossed!'}</p>` : ''}`;
   }
-  const feedback = !host && reveal ? `<div class="feedback">${poll ? (s.self.answered ? 'Thanks for voting! No points in this round.' : 'Voting closed. No points in this round.') : s.self.correct ? `Correct! +${s.self.points} points` : s.self.answered ? 'Not this time. You’ve got the next one!' : 'Time’s up!'}</div>` : '';
+  const feedback = !host && reveal ? `<div class="feedback">${mapPin ? (s.self.answered ? `${s.self.distanceKm.toLocaleString(undefined,{maximumFractionDigits:2})} km away · +${s.self.points} points` : 'No pin submitted. 0 points.') : poll ? (s.self.answered ? 'Thanks for voting! No points in this round.' : 'Voting closed. No points in this round.') : s.self.correct ? `Correct! +${s.self.points} points` : s.self.answered ? 'Not this time. You’ve got the next one!' : 'Time’s up!'}</div>` : '';
   const showHeading = !answerOnly;
   const meta = answerOnly ? '' : `<div class="question-meta"><div class="timer" aria-label="Seconds remaining" id="timer">${reveal ? '✓' : q.timeLimit}</div><div class="progress" aria-hidden="true"><div id="time-progress" style="width:${reveal ? 0 : 100}%"></div></div><span class="answer-count">${s.answeredCount} / ${s.players.length} ${poll ? 'voted' : 'answered'}</span></div>`;
   const answerView = !host && s.status === 'question' && q.answers?.length >= 2 ? `<div class="answer-view-control"><button class="btn ghost" data-toggle-answer-view aria-pressed="${answerOnly}">${answerOnly ? 'Show question + answers' : 'Show answers only'}</button></div>` : '';
   return `${showHeading ? heading : ''}${meta}${answerView}${controls}${feedback}${revealImage}${reveal && !poll ? leaderboard(s.leaderboard) : ''}${host ? `<div class="lobby-actions"><button class="btn light" data-action="next">${!reveal ? (poll ? 'Show votes' : 'Reveal answers') : s.questionIndex + 1 === s.questionCount ? 'Show podium 🏆' : 'Next question →'}</button><button class="btn ghost" data-action="end">End game</button></div>` : reveal ? '<p class="muted-white">Waiting for the host…</p>' : ''}`;
 }
+const pendingPins = new Map();
 function renderRoom() {
+  clearQuizMaps();
   const oldInput = document.querySelector('#typed-answer');
   const inputDraft = oldInput ? {value:oldInput.value, index:Number(oldInput.dataset.questionIndex), focused:document.activeElement === oldInput, start:oldInput.selectionStart, end:oldInput.selectionEnd} : null;
   const version = routeVersion, token = session.token;
@@ -376,7 +393,7 @@ function renderRoom() {
   if (s.status==='countdown') {
     content = `<div class="start-countdown"><p class="eyebrow">Get ready to play</p><strong id="start-countdown">10</strong><p>The quiz is about to begin!</p></div>`;
   } else if (s.status==='lobby') {
-    content = host ? `<p class="eyebrow">Ready, set, quiz.</p><h1>Everyone in?</h1><p class="join-url">Join at <b>${escapeHTML(location.host)}</b> with game PIN</p><div class="pin-display"><small>GAME PIN</small><strong>${s.pin}</strong></div><div class="qr-invite"><img src="/api/rooms/${s.pin}/qr" alt="QR code to join game PIN ${s.pin}" width="240" height="240"><p>Scan to join</p></div><div><button class="btn ghost" id="copy-link">Copy invite link ↗</button></div><p class="scoring-note"><b>How points work:</b> A correct answer earns 500 base points plus up to 500 speed points. The speed bonus decreases steadily as time runs out, so an instant answer earns 1,000 and a correct answer at the deadline earns 500. Wrong or missed answers earn 0; polls are unscored.</p><p class="room-title">${s.players.length} ${s.players.length===1?'player':'players'} in the lobby</p><div class="player-list">${s.players.length?s.players.map(p=>`<span class="player-chip"><span aria-hidden="true">${escapeHTML(p.emoji || '😀')}</span> ${escapeHTML(p.nickname)}</span>`).join(''):'<p class="empty">The stage is set. Just waiting for your people…</p>'}</div><div class="lobby-actions"><button class="btn light" data-action="start" ${s.players.length?'':'disabled'}>Start game →</button></div>` : `<div class="podium-icon" aria-hidden="true">✦</div><p class="eyebrow">You're on the list</p><h1>You're in, ${escapeHTML(s.self.emoji || '😀')} ${escapeHTML(s.self.nickname)}!</h1><p class="subtitle">Get ready. Your host will start the game soon.</p><p class="scoring-note"><b>How points work:</b> A correct answer earns 500 base points plus up to 500 speed points. The speed bonus decreases steadily as time runs out, so an instant answer earns 1,000 and a correct answer at the deadline earns 500. Wrong or missed answers earn 0; polls are unscored.</p><span class="spinner"></span><p class="muted-white">${s.players.length} ${s.players.length===1?'player':'players'} ready to play</p>`;
+    content = host ? `<p class="eyebrow">Ready, set, quiz.</p><h1>Everyone in?</h1><p class="join-url">Join at <b>${escapeHTML(location.host)}</b> with game PIN</p><div class="pin-display"><small>GAME PIN</small><strong>${s.pin}</strong></div><div class="qr-invite"><img src="/api/rooms/${s.pin}/qr" alt="QR code to join game PIN ${s.pin}" width="240" height="240"><p>Scan to join</p></div><div><button class="btn ghost" id="copy-link">Copy invite link ↗</button></div><p class="scoring-note"><b>How points work:</b> A correct answer earns 500 base points plus up to 500 speed points. The speed bonus decreases steadily as time runs out, so an instant answer earns 1,000 and a correct answer at the deadline earns 500. Wrong or missed answers earn 0; polls are unscored. Map pins earn up to 1,000 points for distance alone; closer is better.</p><p class="room-title">${s.players.length} ${s.players.length===1?'player':'players'} in the lobby</p><div class="player-list">${s.players.length?s.players.map(p=>`<span class="player-chip"><span aria-hidden="true">${escapeHTML(p.emoji || '😀')}</span> ${escapeHTML(p.nickname)}</span>`).join(''):'<p class="empty">The stage is set. Just waiting for your people…</p>'}</div><div class="lobby-actions"><button class="btn light" data-action="start" ${s.players.length?'':'disabled'}>Start game →</button></div>` : `<div class="podium-icon" aria-hidden="true">✦</div><p class="eyebrow">You're on the list</p><h1>You're in, ${escapeHTML(s.self.emoji || '😀')} ${escapeHTML(s.self.nickname)}!</h1><p class="subtitle">Get ready. Your host will start the game soon.</p><p class="scoring-note"><b>How points work:</b> A correct answer earns 500 base points plus up to 500 speed points. The speed bonus decreases steadily as time runs out, so an instant answer earns 1,000 and a correct answer at the deadline earns 500. Wrong or missed answers earn 0; polls are unscored. Map pins earn up to 1,000 points for distance alone; closer is better.</p><span class="spinner"></span><p class="muted-white">${s.players.length} ${s.players.length===1?'player':'players'} ready to play</p>`;
   } else if (isQuestion || isReveal || s.status === 'preview') {
     content = questionContent(s);
   } else {
@@ -395,6 +412,17 @@ function renderRoom() {
     try { await api(`/rooms/${s.pin}/answer`, {method:'POST', token, body:{...answer, questionIndex:s.questionIndex}}); }
     finally { const result = await api(`/rooms/${s.pin}/state`, {token}); if (version === routeVersion) { roomState = result; renderRoom(); } }
   };
+  const mapElement = document.querySelector('#answer-map');
+  if (mapElement) {
+    const key = `${s.pin}:${s.questionIndex}`, form = document.querySelector('#map-answer-form');
+    const point = s.self?.answerLocation || (form ? pendingPins.get(key) : undefined);
+    if (form && point) setLocationFields(form, point);
+    const widget = mountQuizMap(mapElement, {key:`room:${key}:${s.status}`, point, target:isReveal ? q.target : undefined, onSelect:form ? point => { pendingPins.set(key,point); setLocationFields(form,point); } : undefined});
+    if (form) {
+      wireLocationFields(form, widget);
+      form.addEventListener('submit', event => { event.preventDefault(); const answerLocation = readLocation(form); if (answerLocation) run(event.submitter, () => submitAnswer({answerLocation})); });
+    }
+  }
   document.querySelector('#typed-answer-form')?.addEventListener('submit', event => {
     event.preventDefault(); const answerText = typedInput.value;
     run(event.submitter, () => submitAnswer({answerText}));
@@ -440,6 +468,7 @@ function updateTimer() {
   const progress=document.querySelector('#time-progress');if(progress)progress.style.width=`${remaining/(roomState.question.timeLimit*1000)*100}%`;
 }
 async function route() {
+  clearQuizMaps();
   const version=++routeVersion;stream?.close();stream=null;clearInterval(timer);clearInterval(streamWatchdog);clearInterval(statePoll);statePoll=null;roomState=null;
   const [page,arg,pin]=location.hash.slice(1).split('/');
   document.body.classList.toggle('playing-game', page === 'room');

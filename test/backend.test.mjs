@@ -278,3 +278,47 @@ test('uploaded images are bounded, saved with quizzes, served safely, and surviv
   const preview = (await f.request(`/api/rooms/${room.pin}/start`,{method:'POST',token:room.hostToken})).data;
   assert.equal(preview.status,'preview');assert.equal(preview.question.image,image);assert.equal(preview.question.imageAlt,'A test pixel');assert.equal(preview.question.answers,undefined);
 });
+
+test('map pins validate, hide the target, and award distance-based points once', async t => {
+  const f = await fixture(t);
+  const question = {type:'map-pin', question:'Find the target', target:{lat:0,lng:0}, maxDistanceKm:1000, timeLimit:30};
+  for (const invalid of [{...question,target:{lat:91,lng:0}}, {...question,target:{lat:0,lng:'0'}}, {...question,maxDistanceKm:0}, {...question,target:null}]) {
+    assert.equal((await f.request('/api/quizzes',{method:'POST',token:'map-test-owner-token',body:{title:'Invalid map',questions:[invalid]}})).status,400);
+  }
+  const room = (await f.request('/api/rooms',{method:'POST',token:'map-test-owner-token',body:{quiz:{title:'Map quiz',questions:[question,question]}}})).data;
+  const route = `/api/rooms/${room.pin}`;
+  const players = [];
+  for (const nickname of ['Exact','Near','Far','Missed']) players.push((await f.request(`${route}/join`,{method:'POST',body:{nickname}})).data.playerToken);
+  const action = name => f.request(`${route}/${name}`,{method:'POST',token:room.hostToken});
+  const state = token => f.request(`${route}/state`,{token}).then(r=>r.data);
+  await action('start');
+  assert.equal((await state(players[0])).question.target,undefined);
+  await action('open');
+  assert.equal((await state(room.hostToken)).question.target,undefined);
+  assert.equal((await f.request(`${route}/answer`,{method:'POST',token:players[0],body:{questionIndex:0,answerLocation:{lat:0,lng:181}}})).status,400);
+  for (const [i,lng] of [0,1,20].entries()) {
+    assert.equal((await f.request(`${route}/answer`,{method:'POST',token:players[i],body:{questionIndex:0,answerLocation:{lat:0,lng},points:999999}})).status,200);
+  }
+  assert.equal((await state(players[0])).self.points,undefined);
+  assert.equal((await state(players[1])).self.distanceKm,undefined);
+  assert.deepEqual((await state(players[1])).self.answerLocation,{lat:0,lng:1});
+  assert.equal((await f.request(`${route}/answer`,{method:'POST',token:players[0],body:{questionIndex:0,answerLocation:{lat:0,lng:0}}})).status,409);
+  await action('next');
+  const exact = await state(players[0]), near = await state(players[1]), far = await state(players[2]);
+  assert.deepEqual(exact.question.target,question.target);
+  assert.equal(exact.self.points,1000); assert.equal(exact.self.score,1000);
+  assert.equal(near.self.points,889); assert.ok(Math.abs(near.self.distanceKm-111.195)<0.001);
+  assert.equal(far.self.points,0); assert.equal((await state(players[3])).self.points,0);
+  await action('next'); await action('open');
+  assert.equal((await state(players[1])).self.answerLocation,undefined);
+  assert.equal((await f.request(`${route}/answer`,{method:'POST',token:players[0],body:{questionIndex:0,answerLocation:{lat:0,lng:0}}})).status,409);
+});
+
+test('great-circle map distance handles the date line and poles', async () => {
+  const {distanceKm,mapPoints} = await import('../lib/quiz.mjs');
+  assert.ok(Math.abs(distanceKm({lat:0,lng:179},{lat:0,lng:-179})-222.39)<0.01);
+  assert.ok(distanceKm({lat:90,lng:0},{lat:90,lng:180})<0.00001);
+  assert.equal(mapPoints(500,1000),500);
+  assert.equal(mapPoints(1000,1000),0);
+  assert.equal(mapPoints(2000,1000),0);
+});
