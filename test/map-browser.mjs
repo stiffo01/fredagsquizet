@@ -24,14 +24,18 @@ try {
     const target=await fetch(`${debugOrigin.origin}/json/new?${encodeURIComponent('about:blank')}`,{method:'PUT'}).then(r=>r.json());
     const socket=new WebSocket(target.webSocketDebuggerUrl);sockets.push(socket);
     await new Promise((resolve,reject)=>{socket.onopen=resolve;socket.onerror=reject;});
-    let id=0;const pending=new Map();const exceptions=[];
-    socket.onmessage=e=>{const m=JSON.parse(e.data);if(m.id){const p=pending.get(m.id);if(p){pending.delete(m.id);m.error?p.reject(new Error(m.error.message)):p.resolve(m.result);}}if(m.method==='Runtime.exceptionThrown')exceptions.push(m.params.exceptionDetails);};
+    let id=0;const pending=new Map();const exceptions=[]; const tileRequests=[];
+    socket.onmessage=e=>{const m=JSON.parse(e.data);if(m.id){const p=pending.get(m.id);if(p){pending.delete(m.id);m.error?p.reject(new Error(m.error.message)):p.resolve(m.result);}}if(m.method==='Fetch.requestPaused') {
+      // Inspect real browser headers, but serve a fixture instead of fetching OSM tiles.
+      tileRequests.push(m.params.request);
+      void call('Fetch.fulfillRequest',{requestId:m.params.requestId,responseCode:200,responseHeaders:[{name:'Content-Type',value:'image/png'}],body:'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGP4z8AAAAMBAQDJ/pLvAAAAAElFTkSuQmCC'});
+    }if(m.method==='Runtime.exceptionThrown')exceptions.push(m.params.exceptionDetails);};
     const call=(method,params={})=>new Promise((resolve,reject)=>{const key=++id;pending.set(key,{resolve,reject});socket.send(JSON.stringify({id:key,method,params}));});
     const evaluate=async expression=>{const r=await call('Runtime.evaluate',{expression,returnByValue:true,awaitPromise:true});if(r.exceptionDetails)throw new Error(JSON.stringify(r.exceptionDetails));return r.result.value;};
     const wait=async expression=>{for(let i=0;i<100;i++){if(await evaluate(expression))return;await new Promise(r=>setTimeout(r,50));}throw new Error(`Wait failed: ${expression}\nURL: ${await evaluate('location.href')}\n${await evaluate('document.body.innerText')}`);};
     const click=async selector=>{await wait(`!!document.querySelector(${JSON.stringify(selector)})`);await evaluate(`document.querySelector(${JSON.stringify(selector)}).click()`);};
-    await call('Runtime.enable'); await call('Network.enable'); if (hash.startsWith('host')) await call('Network.setExtraHTTPHeaders',{headers:{Authorization:'Basic '+Buffer.from('test:test').toString('base64')}}); await call('Page.navigate',{url:origin+'/'+hash}); await wait('document.readyState === "complete" && !!document.querySelector("#app")');
-    return {evaluate,wait,click,call,exceptions};
+    await call('Fetch.enable',{patterns:[{urlPattern:'https://tile.openstreetmap.org/*',requestStage:'Request'}]}); await call('Runtime.enable'); await call('Network.enable'); if (hash.startsWith('host')) await call('Network.setExtraHTTPHeaders',{headers:{Authorization:'Basic '+Buffer.from('test:test').toString('base64')}}); await call('Page.navigate',{url:origin+'/'+hash}); await wait('document.readyState === "complete" && !!document.querySelector("#app")');
+    return {evaluate,wait,click,call,exceptions,tileRequests};
   }
   const host=await page('host#create');
   await host.wait('!!document.querySelector("#quiz-title")');
@@ -63,8 +67,16 @@ try {
   await alice.wait('document.body.innerText.includes("+889 points")');
   await bob.wait('document.body.innerText.includes("+1000 points")');
   assert.equal(await alice.evaluate('document.querySelectorAll(".quiz-map-pin").length'),2);
-  for (const p of [host,alice,bob]) assert.deepEqual(p.exceptions,[]);
-  console.log('PASS: Map editor, saving, preview secrecy, two players, pending pin and zoom preservation, distance reveal, mobile layout. No screenshots captured.');
+  for (const p of [host,alice,bob]) {
+    assert.deepEqual(p.exceptions,[]);
+    assert.ok(p.tileRequests.length > 0, 'browser must request map tiles');
+    for (const request of p.tileRequests) {
+      const referer = Object.entries(request.headers).find(([name])=>name.toLowerCase()==='referer')?.[1];
+      assert.equal(referer,origin+'/', 'tile requests identify the site without leaking paths or game tokens');
+    }
+  }
+  assert.equal((await fetch(origin)).headers.get('referrer-policy'),'no-referrer','other resources keep the existing privacy policy');
+  console.log('PASS: Map editor, saving, preview secrecy, two players, pending pin and zoom preservation, distance reveal, mobile layout, origin-only tile Referer. Tiles mocked; no OSM requests or screenshots captured.');
 } catch (error) {
   console.error(error); throw error;
 } finally {

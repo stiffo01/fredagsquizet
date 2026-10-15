@@ -95,3 +95,5 @@ The application and Compose service are named **Fredagsquizet** (`fredagsquizet`
 Basic Auth settings are read from `HOST_USERNAME` and `HOST_PASSWORD`. Change them in `.env` and recreate the container to rotate credentials. The local `.env` file is ignored by Git; keep it private.
 
 Run `npm run test:map-browser` for the DOM-only map editor and two-player gameplay test (requires Chromium). No screen captures are taken.
+
+Map tile requests send only the site origin as their Referer to meet OpenStreetMap’s usage policy; the rest of the app retains `no-referrer`. The map browser test intercepts tile requests and checks that header using local fixture images, without downloading tiles from OpenStreetMap.

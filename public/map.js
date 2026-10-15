@@ -10,6 +10,9 @@ function mountQuizMap(element, {key, point, target, onSelect}) {
   const map = L.map(element, {worldCopyJump:true, minZoom:2, maxZoom:19}).setView(view?.center || (target || point || [20,0]), view?.zoom ?? (target || point ? 5 : 2));
   quizMaps.push({map, key});
   L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    // OSM requires a Referer; override the page's no-referrer policy only for tiles.
+    // Send the origin, never host paths, game PINs, or session tokens.
+    referrerPolicy:'strict-origin',
     maxZoom:19, attribution:'&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
   }).addTo(map).on('tileerror', () => {
     const status = element.parentElement.querySelector('[data-map-status]');
