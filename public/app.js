@@ -491,7 +491,7 @@ function questionContent(s) {
   const image = mapPin && !preview ? '' : `<figure class="question-picture"><img src="${escapeHTML(q.image || defaultPicture(q))}" alt="${escapeHTML(q.image ? q.imageAlt || 'Question picture' : 'Colourful quiz illustration')}"></figure>`;
   const revealImage = reveal && !mapPin && q.revealImage ? `<figure class="question-picture explanation-picture"><figcaption>More context</figcaption><img src="${escapeHTML(q.revealImage)}" alt="${escapeHTML(q.revealImageAlt || 'Answer explanation picture')}"></figure>` : '';
   const heading = `<p class="eyebrow">${escapeHTML(questionTypes[q.type] || questionTypes.quiz)} · Question ${s.questionIndex + 1} of ${s.questionCount}</p><h1>${escapeHTML(q.question)}</h1>${image}`;
-  if (preview) return `${heading}<div class="preview-note"><span class="badge">TAKE A LOOK</span>${s.previewEndsAt ? '<div class="preview-countdown"><span>Answers in</span><strong id="preview-countdown">5</strong></div>' : '<p>Read the question and study the picture. Answers will open when the host is ready.</p>'}</div>${host ? '<button class="btn light" data-action="open">Open answers →</button>' : ''}`;
+  if (preview) return `${heading}<div class="preview-note"><span class="badge">TAKE A LOOK</span>${s.previewEndsAt ? '<div class="preview-countdown"><span>Answers in</span><strong id="preview-countdown">5</strong></div>' : '<p>Read the question and study the picture. Answers will open when the host is ready.</p>'}</div>${host ? `<button class="btn light${mapPin ? ' map-host-action' : ''}" data-action="open">Open answers →</button>` : ''}`;
   let controls;
   if (mapPin) {
     const editable = !host && !reveal && !s.self.answered;
@@ -507,7 +507,7 @@ function questionContent(s) {
   const showHeading = !answerOnly;
   const meta = answerOnly ? '' : `<div class="question-meta"><div class="timer" aria-label="Seconds remaining" id="timer">${reveal ? '✓' : q.timeLimit}</div><div class="progress" aria-hidden="true"><div id="time-progress" style="width:${reveal ? 0 : 100}%"></div></div><span class="answer-count">${s.answeredCount} / ${s.players.length} ${poll ? 'voted' : 'answered'}</span></div>`;
   const answerView = !host && s.status === 'question' && q.answers?.length >= 2 ? `<div class="answer-view-control"><button class="btn ghost" data-toggle-answer-view aria-pressed="${answerOnly}">${answerOnly ? 'Show question + answers' : 'Show answers only'}</button></div>` : '';
-  return `${showHeading ? heading : ''}${meta}${answerView}${controls}${feedback}${revealImage}${reveal && !poll ? leaderboard(s.leaderboard) : ''}${host ? `<div class="lobby-actions"><button class="btn light" data-action="next">${!reveal ? (poll ? 'Show votes' : 'Reveal answers') : s.questionIndex + 1 === s.questionCount ? 'Show podium 🏆' : 'Next question →'}</button><button class="btn ghost" data-action="end">End game</button></div>` : reveal ? '<p class="muted-white">Waiting for the host…</p>' : ''}`;
+  return `${showHeading ? heading : ''}${meta}${answerView}${controls}${feedback}${revealImage}${reveal && !poll ? leaderboard(s.leaderboard) : ''}${host ? `<div class="lobby-actions${mapPin ? ' map-host-actions' : ''}"><button class="btn light" data-action="next">${!reveal ? (poll ? 'Show votes' : 'Reveal answers') : s.questionIndex + 1 === s.questionCount ? 'Show podium 🏆' : 'Next question →'}</button><button class="btn ghost" data-action="end">End game</button></div>` : reveal ? '<p class="muted-white">Waiting for the host…</p>' : ''}`;
 }
 const pendingPins = new Map();
 function renderRoom() {

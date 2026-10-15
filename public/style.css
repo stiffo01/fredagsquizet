@@ -45,6 +45,9 @@
 .map-status{position:absolute;z-index:1000;top:10px;left:10px;max-width:calc(100% - 20px);margin:0;color:#252033;font-size:12px}
 .map-status:not(:empty){padding:8px 10px;border-radius:8px;background:#fff;box-shadow:0 2px 12px #0004}
 @media(max-width:600px){.map-answer{margin:4px auto 8px}.map-answer .quiz-map{height:clamp(250px,57svh,540px)}.map-answer-controls{bottom:10px}.map-answer-controls .map-lock-button{padding:11px 18px;font-size:15px}.map-answer-controls .map-coordinate-toggle{right:8px;padding:9px 10px;font-size:12px}.map-answer-controls .map-coordinates{right:8px;bottom:48px;width:min(280px,calc(100% - 16px))}}
+.map-host-actions,.map-host-action{position:fixed;z-index:2000;left:50%;bottom:calc(12px + env(safe-area-inset-bottom));transform:translateX(-50%);margin:0;padding:10px;background:#46178feF;border:1px solid #ffffff55;border-radius:12px;box-shadow:0 5px 24px #16042d99}
+.map-host-actions{display:flex;gap:10px;white-space:nowrap}
+.map-host-action{white-space:nowrap}
 
 .scan-status{min-height:0;margin:8px 0 0;text-align:center}.scan-status:empty{display:none}.join .card .scan-status{color:#766f85}
 .qr-scanner{position:fixed;inset:0;z-index:20;display:grid;place-items:center;padding:18px;background:#160c25ef}.qr-scanner-panel{width:min(100%,520px);padding:22px;border-radius:16px;background:#fff;color:#252033;text-align:center;box-shadow:0 14px 50px #0008}.qr-scanner-panel video{display:block;width:100%;max-height:65svh;margin:14px auto;border-radius:10px;background:#17121d;object-fit:cover}.qr-scanner-panel .small{min-height:20px}
