@@ -266,7 +266,10 @@ export function createApp({ dataDir = process.env.DATA_DIR || path.join(baseDir,
           if ([...room.players.values()].some(p => p.nickname.toLowerCase() === nickname.trim().toLowerCase())) fail(409, 'That nickname is already taken.');
           const playerToken = secret(); room.players.set(playerToken, { id: randomUUID(), nickname: nickname.trim(), emoji, score: 0, correctAnswers: 0 }); room.touchedAt = Date.now(); broadcast(room); return send(res, 201, { playerToken });
         }
-        const who = identity(room, bearer(req) || req.headers['x-quiz-host-token'] || url.searchParams.get('token')); if (!who) fail(401, 'A valid game token is required.');
+        const hostAdminAction = req.method === 'POST' && ['end', 'clear-scoreboard'].includes(action);
+        let who;
+        if (hostAdminAction) { authorizeHost(req); who = { host: true }; }
+        else { who = identity(room, bearer(req) || req.headers['x-quiz-host-token'] || url.searchParams.get('token')); if (!who) fail(401, 'A valid game token is required.'); }
         room.touchedAt = Date.now();
         if (req.method === 'GET' && ['state', 'events'].includes(action)) {
           if (room.status === 'preview' && room.previewEndsAt && Date.now() >= room.previewEndsAt) openAnswers(room);
@@ -305,7 +308,7 @@ export function createApp({ dataDir = process.env.DATA_DIR || path.join(baseDir,
           return send(res, 200, { ok: true });
         }
         if (req.method === 'POST' && ['start', 'open', 'next', 'end', 'show-scoreboard', 'clear-scoreboard'].includes(action)) {
-          authorizeHost(req);
+          if (!hostAdminAction) authorizeHost(req);
           if (!who.host) fail(403, 'Only the host can control the game.');
           if (action === 'start') { if (room.status !== 'lobby') fail(409, 'Game already started.'); if (!room.players.size) fail(409, 'Wait for at least one player.'); beginCountdown(room); }
           if (action === 'open') {

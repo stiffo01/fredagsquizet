@@ -44,10 +44,12 @@ test('host game manager lists active quizzes, exposes final scoreboards, and can
   let games = (await f.request('/api/rooms')).data;
   assert.equal(games.length,1);assert.equal(games[0].quizTitle,quiz.title);assert.ok(games[0].quizId);assert.equal(games[0].status,'lobby');
   assert.equal(games[0].scoreboardAvailable,false);
-  await f.request(`/api/rooms/${room.pin}/end`,{method:'POST',token:room.hostToken});
+  assert.equal((await f.request(`/api/rooms/${room.pin}/start`,{method:'POST'})).status,401,'regular host sign-in alone does not control live gameplay');
+  await f.request(`/api/rooms/${room.pin}/end`,{method:'POST'});
   games = (await f.request('/api/rooms')).data;
   assert.equal(games[0].status,'finished');assert.equal(games[0].scoreboardAvailable,true);
-  await f.request(`/api/rooms/${room.pin}/clear-scoreboard`,{method:'POST',token:games[0].hostToken});
+  assert.equal((await fetch(`${f.base}/api/rooms/${room.pin}/clear-scoreboard`,{method:'POST'})).status,401,'only signed-in hosts can clear a scoreboard');
+  await f.request(`/api/rooms/${room.pin}/clear-scoreboard`,{method:'POST'});
   games = (await f.request('/api/rooms')).data;
   assert.equal(games[0].scoreboardAvailable,false);assert.equal(games[0].scoreboardDeleted,true);
 });

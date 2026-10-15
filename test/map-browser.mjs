@@ -129,8 +129,14 @@ try {
   await host.click('[data-action=show-scoreboard]');
   await host.wait('!!document.querySelector("#scoreboard-reveal .podium-reveal")');
   assert.deepEqual(host.exceptions,[],'host scoreboard must render without JSON or browser errors');
+  const admin=await page('host#host');
+  await admin.wait(`!!document.querySelector('[data-remove-scoreboard="${pin}"]')`);
+  await admin.evaluate('window.confirm=()=>true');
+  await admin.click(`[data-remove-scoreboard="${pin}"]`);
+  await admin.wait(`Array.from(document.querySelectorAll('.game-admin-card')).some(card=>card.textContent.includes('SCOREBOARD REMOVED'))`);
+  assert.deepEqual(admin.exceptions,[],'a different signed-in host can remove the scoreboard without the game host token');
+  for (const p of [host,alice,bob,admin]) assert.deepEqual(p.exceptions,[]);
   for (const p of [host,alice,bob]) {
-    assert.deepEqual(p.exceptions,[]);
     assert.ok(p.tileRequests.length > 0, 'browser must request map tiles');
     assert.deepEqual(p.forbiddenRequests,[], 'never request blocked OSM raster tiles');
     assert.ok(p.tileRequests.every(request=>request.url.startsWith('https://tiles.openfreemap.org/')));
