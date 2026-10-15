@@ -398,8 +398,8 @@ function questionContent(s) {
   const answerOnly = !host && playerAnswerOnly && s.status === 'question';
   const mapPin = q.type === 'map-pin';
   const typed = q.type === 'type-answer', poll = q.type === 'poll';
-  const image = `<figure class="question-picture"><img src="${escapeHTML(q.image || defaultPicture(q))}" alt="${escapeHTML(q.image ? q.imageAlt || 'Question picture' : 'Colourful quiz illustration')}"></figure>`;
-  const revealImage = reveal && q.revealImage ? `<figure class="question-picture explanation-picture"><figcaption>More context</figcaption><img src="${escapeHTML(q.revealImage)}" alt="${escapeHTML(q.revealImageAlt || 'Answer explanation picture')}"></figure>` : '';
+  const image = mapPin && !preview ? '' : `<figure class="question-picture"><img src="${escapeHTML(q.image || defaultPicture(q))}" alt="${escapeHTML(q.image ? q.imageAlt || 'Question picture' : 'Colourful quiz illustration')}"></figure>`;
+  const revealImage = reveal && !mapPin && q.revealImage ? `<figure class="question-picture explanation-picture"><figcaption>More context</figcaption><img src="${escapeHTML(q.revealImage)}" alt="${escapeHTML(q.revealImageAlt || 'Answer explanation picture')}"></figure>` : '';
   const heading = `<p class="eyebrow">${escapeHTML(questionTypes[q.type] || questionTypes.quiz)} · Question ${s.questionIndex + 1} of ${s.questionCount}</p><h1>${escapeHTML(q.question)}</h1>${image}`;
   if (preview) return `${heading}<div class="preview-note"><span class="badge">TAKE A LOOK</span>${s.previewEndsAt ? '<div class="preview-countdown"><span>Answers in</span><strong id="preview-countdown">5</strong></div>' : '<p>Read the question and study the picture. Answers will open when the host is ready.</p>'}</div>${host && !s.previewEndsAt ? '<button class="btn light" data-action="open">Open answers →</button>' : ''}`;
   let controls;
