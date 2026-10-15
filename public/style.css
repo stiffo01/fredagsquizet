@@ -48,6 +48,34 @@
 .map-host-actions,.map-host-action{position:fixed;z-index:2000;left:50%;bottom:calc(12px + env(safe-area-inset-bottom));transform:translateX(-50%);margin:0;padding:10px;background:#46178feF;border:1px solid #ffffff55;border-radius:12px;box-shadow:0 5px 24px #16042d99}
 .map-host-actions{display:flex;gap:10px;white-space:nowrap}
 .map-host-action{white-space:nowrap}
+@media(max-width:700px){
+  body.playing-game{height:100svh;overflow:hidden}
+  body.playing-game main{min-height:0;padding:8px 10px 10px;overflow:hidden}
+  body.playing-game footer{display:none}
+  body.playing-game .room{height:100%;min-height:0;margin:0 auto;overflow:hidden}
+  body.playing-game .room-bar{margin-bottom:8px;min-height:28px}
+  body.playing-game .room h1{font-size:clamp(22px,6vw,32px);line-height:1.08;margin:4px auto 10px}
+  body.playing-game .room .eyebrow{margin-bottom:7px}
+  body.playing-game .question-picture{margin:7px auto;padding:6px}
+  body.playing-game .question-picture img{max-height:25svh}
+  body.playing-game:not(.question-preview) .question-picture{display:none}
+  body.playing-game .preview-note{margin:10px auto;line-height:1.35}
+  body.playing-game .preview-note + .btn{margin:4px auto}
+  body.playing-game .question-meta{gap:8px;margin:8px 0 10px}
+  body.playing-game .timer{width:44px;height:44px;font-size:19px}
+  body.playing-game .progress{margin:0 4px}
+  body.playing-game .answers{gap:8px}
+  body.playing-game .answer{min-height:clamp(64px,11svh,88px);padding:9px;flex-direction:row;align-items:center;gap:8px;font-size:clamp(14px,4vw,18px)}
+  body.playing-game .answer .symbol{font-size:23px}
+  body.playing-game .map-answer{margin:4px auto 8px}
+  body.playing-game .map-answer .quiz-map{height:clamp(220px,46svh,380px)}
+  body.playing-game.question-reveal .map-answer .quiz-map{height:clamp(180px,34svh,300px)}
+  body.playing-game .feedback{margin:8px auto;padding:9px;font-size:16px}
+  body.playing-game .ranking{margin:8px auto}
+  body.playing-game .rank-row{gap:8px;margin:4px 0;padding:7px 10px;font-size:13px}
+  body.playing-game .rank-row:nth-child(n+4){display:none}
+  body.playing-game .lobby-actions:not(.map-host-actions){margin-top:10px}
+}
 
 .scan-status{min-height:0;margin:8px 0 0;text-align:center}.scan-status:empty{display:none}.join .card .scan-status{color:#766f85}
 .qr-scanner{position:fixed;inset:0;z-index:20;display:grid;place-items:center;padding:18px;background:#160c25ef}.qr-scanner-panel{width:min(100%,520px);padding:22px;border-radius:16px;background:#fff;color:#252033;text-align:center;box-shadow:0 14px 50px #0008}.qr-scanner-panel video{display:block;width:100%;max-height:65svh;margin:14px auto;border-radius:10px;background:#17121d;object-fit:cover}.qr-scanner-panel .small{min-height:20px}

@@ -516,6 +516,8 @@ function renderRoom() {
   const inputDraft = oldInput ? {value:oldInput.value, index:Number(oldInput.dataset.questionIndex), focused:document.activeElement === oldInput, start:oldInput.selectionStart, end:oldInput.selectionEnd} : null;
   const version = routeVersion, token = session.token;
   const s = roomState, host = s.host, q = s.question, isQuestion = s.status==='question', isReveal=s.status==='reveal';
+  document.body.classList.toggle('question-preview', s.status === 'preview');
+  document.body.classList.toggle('question-reveal', isReveal);
   const url = `${location.origin}/#join/${s.pin}`;
   const bar = `<div class="room-bar"><span><b>PIN ${escapeHTML(s.pin)}</b> · ${escapeHTML(s.quizTitle)}</span><span class="connection">● Connected</span><button class="danger-link" id="leave-room">${host?'Leave host screen':'Leave game'}</button></div>`;
   let content;
@@ -608,6 +610,8 @@ async function route() {
   const version=++routeVersion;stream?.close();stream=null;clearInterval(timer);roomSyncCleanup?.();roomSyncCleanup=null;clearInterval(statePoll);statePoll=null;roomState=null;
   const [page,arg,pin]=location.hash.slice(1).split('/');
   document.body.classList.toggle('playing-game', page === 'room');
+  document.body.classList.remove('question-preview');
+  document.body.classList.remove('question-reveal');
   setGithubActive(page !== 'room');
   if ((['host','create','edit'].includes(page) || (page === 'room' && arg === 'host')) && location.pathname !== '/host') { location.replace(`/host${location.hash}`); return; }
   try {
