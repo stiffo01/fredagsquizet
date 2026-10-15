@@ -5,7 +5,7 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { createApp } from '../server.mjs';
-const temp = await mkdtemp(path.join(tmpdir(), 'quizpop-browser-'));
+const temp = await mkdtemp(path.join(tmpdir(), 'fredagsquizet-browser-'));
 const local = createApp({dataDir:path.join(temp,'data')});
 await new Promise(resolve=>local.server.listen(0,'127.0.0.1',resolve));
 const origin = `http://127.0.0.1:${local.server.address().port}`;

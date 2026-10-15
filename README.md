@@ -90,10 +90,12 @@ Paste a public picture URL into the URL field for a quiz cover or question, then
 
 Questions without an uploaded or URL-imported picture automatically show original colourful quiz-themed artwork. Each question type has its own illustration, shown in the editor, preview, answering, and results. Removing a custom picture restores the default. No external image service is needed.
 
-The application and Compose service are named **Fredagsquizet** (`fredagsquizet` in Compose). Existing browser ownership/session keys and the `quiz-data` volume remain unchanged so the rename preserves saved quizzes.
+The application, Compose project, service, container, and image are named **Fredagsquizet** (`fredagsquizet`). Compose explicitly sets the project name, so it does not depend on the checkout directory. Saved quizzes use the `fredagsquizet_quiz-data` Docker volume, and the network is `fredagsquizet_default`. Browser ownership, drafts, and sessions automatically migrate to `fredagsquizet-` storage keys. Existing installations with an older Compose project name must copy their quiz-data volume before starting the renamed project.
 
 Basic Auth settings are read from `HOST_USERNAME` and `HOST_PASSWORD`. Change them in `.env` and recreate the container to rotate credentials. The local `.env` file is ignored by Git; keep it private.
 
 Run `npm run test:map-browser` for the DOM-only map editor and two-player gameplay test (requires Chromium). No screen captures are taken.
 
 Map tile requests send only the site origin as their Referer to meet OpenStreetMap’s usage policy; the rest of the app retains `no-referrer`. The map browser test intercepts tile requests and checks that header using local fixture images, without downloading tiles from OpenStreetMap.
+
+For existing servers, follow [Rename an existing deployment without losing quizzes](docs/rename-deployment.md). Reusing the existing volume as an explicitly named external volume is the simplest migration option.

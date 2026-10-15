@@ -12,8 +12,16 @@ const symbols = ['▲', '◆', '●', '■'];
 const escapeHTML = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 // getRandomValues works on LAN HTTP as well as HTTPS; randomUUID requires a secure context.
 const randomToken = () => Array.from(crypto.getRandomValues(new Uint8Array(24)), b => b.toString(16).padStart(2, '0')).join('');
-let ownerToken = localStorage.getItem('quizpop-owner');
-if (!ownerToken) { ownerToken = randomToken(); localStorage.setItem('quizpop-owner', ownerToken); }
+// Preserve ownership, drafts, and sessions saved before the application rename.
+for (const storage of [localStorage, sessionStorage]) {
+  for (const oldKey of Object.keys(storage).filter(key => key.startsWith('quizpop-'))) {
+    const newKey = `fredagsquizet-${oldKey.slice('quizpop-'.length)}`;
+    if (storage.getItem(newKey) === null) storage.setItem(newKey, storage.getItem(oldKey));
+    storage.removeItem(oldKey);
+  }
+}
+let ownerToken = localStorage.getItem('fredagsquizet-owner');
+if (!ownerToken) { ownerToken = randomToken(); localStorage.setItem('fredagsquizet-owner', ownerToken); }
 let stream, roomState, session, timer, streamWatchdog, statePoll, streamLastSignal = 0, autosaveTimer, autosaveTask, autosavePending = false, quizzes = [], draft, routeVersion = 0, playerAnswerOnly = false;
 const questionTypes = {'quiz':'Multiple choice', 'true-false':'True or false', 'type-answer':'Type an answer', 'poll':'Poll', 'map-pin':'Pin on a map'};
 const playerEmojis = ['😀', '😎', '🤓', '🥳', '🐸', '🦊', '🐼', '🐙', '🦄', '🐧', '🐢', '🦖', '🍕', '🚀', '⭐', '👾'];
@@ -94,7 +102,7 @@ function readDraft() {
     timeLimit: Number(el.querySelector('[data-time]').value)
   }));
 }
-const draftKey = value => `quizpop-draft-${value.id || 'new'}`;
+const draftKey = value => `fredagsquizet-draft-${value.id || 'new'}`;
 function cacheDraft(value = draft) {
   try { localStorage.setItem(draftKey(value), JSON.stringify(value)); } catch { /* Server autosave remains available. */ }
 }
@@ -139,7 +147,7 @@ async function persistDraft() {
         if (wasNew) {
           target.id = saved.id;
           history.replaceState(null, '', `/host#edit/${encodeURIComponent(saved.id)}`);
-          try { localStorage.removeItem('quizpop-draft-new'); } catch {}
+          try { localStorage.removeItem('fredagsquizet-draft-new'); } catch {}
         }
         cacheDraft(target);
         const status = document.querySelector('#save-status');
@@ -309,12 +317,12 @@ function editor() {
     draft = null; location.href = '/host#host';
   }); };
 }
-function saveSession(value) { session = value; sessionStorage.setItem(`quizpop-${value.role}-${value.pin}`,JSON.stringify(value)); location.hash=`room/${value.role}/${value.pin}`; }
+function saveSession(value) { session = value; sessionStorage.setItem(`fredagsquizet-${value.role}-${value.pin}`,JSON.stringify(value)); location.hash=`room/${value.role}/${value.pin}`; }
 async function connectRoom(role, pin, version) {
-  const stored = sessionStorage.getItem(`quizpop-${role}-${pin}`);
+  const stored = sessionStorage.getItem(`fredagsquizet-${role}-${pin}`);
   if (!stored) { location.href = role==='host'?'/host#host':`/#join/${pin}`; return; }
   session = JSON.parse(stored);
-  playerAnswerOnly = role === 'player' && sessionStorage.getItem(`quizpop-answer-view-${pin}`) === 'answers-only';
+  playerAnswerOnly = role === 'player' && sessionStorage.getItem(`fredagsquizet-answer-view-${pin}`) === 'answers-only';
   roomState = await api(`/rooms/${pin}/state`,{token:session.token});
   if (version !== routeVersion) return;
   renderRoom();
@@ -439,7 +447,7 @@ function renderRoom() {
   }));
   app.querySelectorAll('[data-toggle-answer-view]').forEach(button=>button.onclick=()=>{
     playerAnswerOnly = !playerAnswerOnly;
-    sessionStorage.setItem(`quizpop-answer-view-${s.pin}`, playerAnswerOnly ? 'answers-only' : 'question-and-answers');
+    sessionStorage.setItem(`fredagsquizet-answer-view-${s.pin}`, playerAnswerOnly ? 'answers-only' : 'question-and-answers');
     renderRoom();
   });
   app.querySelectorAll('[data-answer-index]').forEach(button=>button.onclick=()=>run(button,async()=>{

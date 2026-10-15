@@ -5,7 +5,7 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { createApp } from '../server.mjs';
-const temp = await mkdtemp(path.join(tmpdir(), 'quizpop-browser-'));
+const temp = await mkdtemp(path.join(tmpdir(), 'fredagsquizet-browser-'));
 const local = createApp({dataDir:path.join(temp,'data'), hostUsername:'test', hostPassword:'test', startCountdownMs:0, firstPreviewMs:1500});
 await new Promise(resolve=>local.server.listen(0,'127.0.0.1',resolve));
 const origin = `http://127.0.0.1:${local.server.address().port}`;
@@ -34,11 +34,23 @@ try {
     const evaluate=async expression=>{const r=await call('Runtime.evaluate',{expression,returnByValue:true,awaitPromise:true});if(r.exceptionDetails)throw new Error(JSON.stringify(r.exceptionDetails));return r.result.value;};
     const wait=async expression=>{for(let i=0;i<100;i++){if(await evaluate(expression))return;await new Promise(r=>setTimeout(r,50));}throw new Error(`Wait failed: ${expression}\nURL: ${await evaluate('location.href')}\n${await evaluate('document.body.innerText')}`);};
     const click=async selector=>{await wait(`!!document.querySelector(${JSON.stringify(selector)})`);await evaluate(`document.querySelector(${JSON.stringify(selector)}).click()`);};
+    await call('Page.enable');
+    if (hash === 'host#create') await call('Page.addScriptToEvaluateOnNewDocument',{source:`
+      localStorage.setItem('quizpop-owner','legacy-browser-owner-token');
+      localStorage.setItem('quizpop-draft-migration-test',JSON.stringify({title:'Unsaved work'}));
+      sessionStorage.setItem('quizpop-answer-view-123456','answers-only');
+    `});
     await call('Fetch.enable',{patterns:[{urlPattern:'https://tile.openstreetmap.org/*',requestStage:'Request'}]}); await call('Runtime.enable'); await call('Network.enable'); if (hash.startsWith('host')) await call('Network.setExtraHTTPHeaders',{headers:{Authorization:'Basic '+Buffer.from('test:test').toString('base64')}}); await call('Page.navigate',{url:origin+'/'+hash}); await wait('document.readyState === "complete" && !!document.querySelector("#app")');
     return {evaluate,wait,click,call,exceptions,tileRequests};
   }
   const host=await page('host#create');
   await host.wait('!!document.querySelector("#quiz-title")');
+  assert.deepEqual(await host.evaluate(`[
+    localStorage.getItem('fredagsquizet-owner'),
+    JSON.parse(localStorage.getItem('fredagsquizet-draft-migration-test')).title,
+    sessionStorage.getItem('fredagsquizet-answer-view-123456'),
+    [...Object.keys(localStorage),...Object.keys(sessionStorage)].some(key=>key.startsWith('quizpop-'))
+  ]`),['legacy-browser-owner-token','Unsaved work','answers-only',false]);
   await host.evaluate(`document.querySelector('#quiz-title').value='Map browser test'; document.querySelector('[data-question]').value='Find zero'; document.querySelector('[data-type]').value='map-pin'; document.querySelector('[data-type]').dispatchEvent(new Event('change'));`);
   await host.wait('!!document.querySelector(".leaflet-container")');
   await host.evaluate(`quizMaps[0].map.fire('click',{latlng:L.latLng(0,0)}); document.querySelector('[data-map-distance]').value=1000; document.querySelector('#editor-form').requestSubmit();`);

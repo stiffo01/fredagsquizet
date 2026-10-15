@@ -1,6 +1,6 @@
 # REA reconstruction notes
 
-Inspected 2026-10-14 using the installed [morluto/rea](https://github.com/morluto/rea) MCP tools. This is an independently written, functional reconstruction of the PIN-and-nickname quiz experience, named QuizPop!, with a local backend.
+Inspected 2026-10-14 using the installed [morluto/rea](https://github.com/morluto/rea) MCP tools. This is an independently written, functional reconstruction of the PIN-and-nickname quiz experience, named Fredagsquizet, with a local backend.
 
 ## Evidence and boundaries
 
@@ -41,7 +41,7 @@ Completed checks on 2026-10-14:
 
 ## Question types and preview extension
 
-Consulted Kahoot's official [question-type guide](https://support.kahoot.com/hc/en-us/articles/115002308428-Kahoot-question-types) for the follow-up feature request. It describes fixed true/false choices, typed answers with accepted responses, and unscored opinion polls. QuizPop now supports those three alongside multiple choice, with local image uploads for every type. Its typed-answer matching ignores case and whitespace but keeps punctuation significant; this is not an exact implementation of Kahoot's matching rules.
+Consulted Kahoot's official [question-type guide](https://support.kahoot.com/hc/en-us/articles/115002308428-Kahoot-question-types) for the follow-up feature request. It describes fixed true/false choices, typed answers with accepted responses, and unscored opinion polls. Fredagsquizet now supports those three alongside multiple choice, with local image uploads for every type. Its typed-answer matching ignores case and whitespace but keeps punctuation significant; this is not an exact implementation of Kahoot's matching rules.
 
 The host-controlled reading stage is a requested local design: `lobby → preview → question → reveal → preview … → finished`. Only the host can open answers. Preview exposes heading/image/type/time-limit metadata; choices, accepted responses, correct answers, and timing timestamps are withheld. Opening starts the full answer duration. Images persist in the existing data volume and are served as raster media, not executable uploads.
 

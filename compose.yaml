@@ -1,6 +1,9 @@
+name: fredagsquizet
+
 services:
   fredagsquizet:
     container_name: fredagsquizet
+    image: fredagsquizet:latest
     build: .
     ports:
       - "${QUIZ_BIND:-0.0.0.0}:${QUIZ_PORT:-8093}:3000"
