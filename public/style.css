@@ -49,6 +49,7 @@ body.playing-game header,body.playing-game footer{display:none}
 .map-host-actions{display:flex;gap:10px;white-space:nowrap}
 .map-host-action{white-space:nowrap}
 body.playing-game{height:100svh;min-height:0;overflow:hidden}
+body.playing-game>header,body.playing-game>footer{display:none}
 body.playing-game main{min-height:0;flex:1;padding:10px 18px;overflow:hidden}
 body.playing-game .room{height:100%;min-height:0;margin:0 auto;overflow:hidden}
 body.playing-game .room-bar{margin-bottom:10px}
@@ -57,8 +58,8 @@ body.playing-game .question-picture{margin:8px auto;padding:8px}
 body.playing-game .question-picture img{max-height:25svh}
 body.playing-game .question-meta{margin:8px 0 12px}
 body.playing-game .map-answer{margin:4px auto 8px}
-body.playing-game .map-answer .quiz-map{height:clamp(220px,46svh,420px)}
-body.playing-game.question-reveal .map-answer .quiz-map{height:clamp(180px,30svh,280px)}
+body.playing-game .map-answer .quiz-map{height:clamp(190px,40svh,400px)}
+body.playing-game.question-reveal .map-answer .quiz-map{height:clamp(160px,27svh,260px)}
 body.playing-game .feedback{margin:8px auto;padding:10px}
 body.playing-game .ranking{margin:8px auto}
 body.playing-game .rank-row{margin:4px 0;padding:7px 12px}
@@ -85,8 +86,8 @@ body.playing-game .lobby-actions:not(.map-host-actions){margin-top:10px}
   body.playing-game .answer{min-height:clamp(64px,11svh,88px);padding:9px;flex-direction:row;align-items:center;gap:8px;font-size:clamp(14px,4vw,18px)}
   body.playing-game .answer .symbol{font-size:23px}
   body.playing-game .map-answer{margin:4px auto 8px}
-  body.playing-game .map-answer .quiz-map{height:clamp(220px,46svh,380px)}
-  body.playing-game.question-reveal .map-answer .quiz-map{height:clamp(180px,34svh,300px)}
+  body.playing-game .map-answer .quiz-map{height:clamp(190px,40svh,360px)}
+  body.playing-game.question-reveal .map-answer .quiz-map{height:clamp(160px,30svh,260px)}
   body.playing-game .feedback{margin:8px auto;padding:9px;font-size:16px}
   body.playing-game .ranking{margin:8px auto}
   body.playing-game .rank-row{gap:8px;margin:4px 0;padding:7px 10px;font-size:13px}
