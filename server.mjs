@@ -269,7 +269,7 @@ export function createApp({ dataDir = process.env.DATA_DIR || path.join(baseDir,
         const who = identity(room, bearer(req) || req.headers['x-quiz-host-token'] || url.searchParams.get('token')); if (!who) fail(401, 'A valid game token is required.');
         room.touchedAt = Date.now();
         if (room.status === 'preview' && room.previewEndsAt && Date.now() >= room.previewEndsAt) openAnswers(room);
-        if (room.status === 'question' && Date.now() >= room.deadline) reveal(room);
+        if (room.status === 'question' && (Date.now() >= room.deadline || [...room.players.values()].every(player => player.answer !== undefined))) reveal(room);
         if (req.method === 'GET' && action === 'state') return send(res, 200, state(room, who));
         if (req.method === 'GET' && action === 'events') {
           if ([...room.clients].filter(c => c.who === who || (c.who.host && who.host)).length >= 5) fail(429, 'Too many live connections.');
