@@ -405,7 +405,9 @@ function questionContent(s) {
   let controls;
   if (mapPin) {
     const editable = !host && !reveal && !s.self.answered;
-    controls = `<div class="card map-answer"><p>${reveal ? '🎯 Correct location · 📍 Your pin' : editable ? 'Tap the map to place your pin. Pan and zoom to refine it, then lock it in.' : host ? 'Players are placing their pins…' : 'Pin locked in. Waiting for the reveal…'}</p><p class="small">1,000 points at the target, decreasing to 0 at ${q.maxDistanceKm.toLocaleString()} km. No speed bonus.</p><div id="answer-map" class="quiz-map" aria-label="Answer map"></div><p class="small" data-map-status role="status"></p>${editable ? `<form id="map-answer-form">${locationFields(s.self.answerLocation)}<p class="small">Keyboard: arrow keys pan, +/− zoom, Enter places a pin at the centre. You can also enter coordinates.</p><button class="btn primary" type="submit">Lock in pin →</button></form>` : ''}</div>`;
+    const pendingKey = `${s.pin}:${s.questionIndex}`;
+    const hasPin = !!s.self.answerLocation || pendingPins.has(pendingKey);
+    controls = `<div class="map-answer"><p class="visually-hidden">${reveal ? 'Correct location and your pin.' : editable ? 'Tap the map to place your pin. Pan and zoom to refine it, then lock it in.' : host ? 'Players are placing their pins.' : 'Pin locked in. Waiting for the reveal.'}</p><div id="answer-map" class="quiz-map" aria-label="Answer map"></div><p class="map-status" data-map-status role="status"></p>${editable ? `<form id="map-answer-form" class="map-answer-controls">${locationFields(s.self.answerLocation)}<button class="btn primary map-coordinate-toggle" type="button" aria-expanded="false">Enter coordinates</button><button class="btn primary map-lock-button" type="submit" ${hasPin ? '' : 'disabled'}>Lock in pin →</button></form>` : ''}</div>`;
   } else if (typed) {
     controls = reveal ? `<div class="feedback">Accepted answers: ${q.acceptedAnswers.map(escapeHTML).join(' · ')}</div>` : host ? '<p class="waiting-answer">Players are typing their answers…</p>' : s.self.answered ? '<p class="waiting-answer">Answer locked in. Fingers crossed!</p>' : `<form id="typed-answer-form" class="card typed-answer"><label class="field" for="typed-answer">Your answer</label><input class="input" id="typed-answer" data-question-index="${s.questionIndex}" maxlength="200" required autocomplete="off" placeholder="Type your answer…"><button class="btn primary wide" type="submit">Lock in answer →</button></form>`;
   } else {
@@ -454,8 +456,14 @@ function renderRoom() {
     const key = `${s.pin}:${s.questionIndex}`, form = document.querySelector('#map-answer-form');
     const point = s.self?.answerLocation || (form ? pendingPins.get(key) : undefined);
     if (form && point) setLocationFields(form, point);
-    const widget = mountQuizMap(mapElement, {key:`room:${key}:${s.status}`, point, target:isReveal ? q.target : undefined, onSelect:form ? point => { pendingPins.set(key,point); setLocationFields(form,point); } : undefined});
+    const widget = mountQuizMap(mapElement, {key:`room:${key}:${s.status}`, point, target:isReveal ? q.target : undefined, onSelect:form ? point => { pendingPins.set(key,point); setLocationFields(form,point); form.querySelector('.map-lock-button').disabled=false; } : undefined});
     if (form) {
+      const coordinateToggle = form.querySelector('.map-coordinate-toggle');
+      const coordinates = form.querySelector('.map-coordinates');
+      coordinateToggle.onclick = () => {
+        const open = coordinates.classList.toggle('coordinates-open');
+        coordinateToggle.setAttribute('aria-expanded',String(open));
+      };
       wireLocationFields(form, widget);
       form.addEventListener('submit', event => { event.preventDefault(); const answerLocation = readLocation(form); if (answerLocation) run(event.submitter, () => submitAnswer({answerLocation})); });
     }

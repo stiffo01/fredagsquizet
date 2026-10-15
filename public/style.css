@@ -29,3 +29,19 @@
 .quiz-map .leaflet-control-attribution { font-size: 11px; }
 
 .lobby-invite{display:flex;align-items:center;justify-content:center;gap:clamp(12px,4vw,32px);margin:12px auto 14px}.lobby-invite .pin-display{margin:0;padding:18px 26px}.lobby-invite .pin-display strong{font-size:clamp(36px,6vw,64px);letter-spacing:clamp(1px,.7vw,7px)}.lobby-invite .qr-invite{margin:0;padding:10px}.lobby-invite .qr-invite img{width:clamp(136px,18vw,184px);height:clamp(136px,18vw,184px)}.lobby-invite .qr-invite p{margin-top:5px}.room .player-list{margin:12px auto 16px;min-height:76px}@media(max-width:600px){.lobby-invite{gap:10px}.lobby-invite .pin-display{padding:16px 12px}.lobby-invite .pin-display strong{font-size:clamp(32px,8vw,48px);letter-spacing:1px}.lobby-invite .qr-invite{padding:7px}.lobby-invite .qr-invite img{width:clamp(120px,36vw,148px);height:clamp(120px,36vw,148px)}}
+
+.visually-hidden{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}
+.map-answer{position:relative;width:100%;max-width:1000px;margin:8px auto 12px;padding:0;border-radius:12px;background:transparent;color:inherit;box-shadow:none;text-align:left}
+.map-answer .quiz-map{height:clamp(260px,60svh,620px);min-height:0;border-radius:12px;overflow:hidden;box-shadow:0 5px 18px #18053638}
+.map-answer-controls{position:absolute;z-index:1000;left:0;right:0;bottom:12px;display:flex;justify-content:center;align-items:center;gap:10px;pointer-events:none}
+.map-answer-controls .map-lock-button,.map-answer-controls .map-coordinate-toggle{pointer-events:auto;min-height:48px;padding:12px 24px;border:2px solid #fff;border-radius:999px;box-shadow:0 3px 16px #0006;font-size:16px}
+.map-answer-controls .map-lock-button{background:#5c28a5}
+.map-answer-controls .map-lock-button:disabled{opacity:.78}
+.map-answer-controls .map-coordinate-toggle{position:absolute;right:12px;bottom:0;background:#fff;color:#35234c;border:0;padding:10px 14px;font-size:13px;min-height:42px}
+.map-answer-controls .map-coordinates{display:none;position:absolute;right:12px;bottom:52px;width:min(330px,calc(100% - 24px));margin:0;padding:12px;border-radius:10px;background:#fff;color:#252033;box-shadow:0 3px 16px #0005}
+.map-answer-controls .map-coordinates.coordinates-open{display:flex;gap:10px}
+.map-answer-controls .map-coordinates label{font-size:11px}
+.map-answer-controls .map-coordinates .input{padding:8px;font-size:14px}
+.map-status{position:absolute;z-index:1000;top:10px;left:10px;max-width:calc(100% - 20px);margin:0;color:#252033;font-size:12px}
+.map-status:not(:empty){padding:8px 10px;border-radius:8px;background:#fff;box-shadow:0 2px 12px #0004}
+@media(max-width:600px){.map-answer{margin:4px auto 8px}.map-answer .quiz-map{height:clamp(250px,57svh,540px)}.map-answer-controls{bottom:10px}.map-answer-controls .map-lock-button{padding:11px 18px;font-size:15px}.map-answer-controls .map-coordinate-toggle{right:8px;padding:9px 10px;font-size:12px}.map-answer-controls .map-coordinates{right:8px;bottom:48px;width:min(280px,calc(100% - 16px))}}
