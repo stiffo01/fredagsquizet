@@ -223,7 +223,10 @@ test('mixed question types validate, preserve preview secrecy, and score typed a
   assert.equal((await host('next')).status,409);
   state = (await host('open')).data;
   assert.deepEqual(state.question.answers,['True','False']);
-  assert.equal((await host('open')).status,409,'opening twice must not restart the timer');
+  const reopened = await host('open');
+  assert.equal(reopened.status,200,'opening an already open question is safe');
+  assert.equal(reopened.data.status,'question');
+  assert.equal(reopened.data.question.deadline,state.question.deadline,'opening twice must not restart the timer');
   assert.equal((await host('toggle-view')).status,404,'layout preference is a local player control');
   await answer(alice,{questionIndex:0,answerIndex:0});await answer(bob,{questionIndex:0,answerIndex:1});
   state = (await f.request(`${route}/state`,{token:alice})).data;
