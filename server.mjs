@@ -306,7 +306,7 @@ export function createApp({ dataDir = process.env.DATA_DIR || path.join(baseDir,
           authorizeHost(req);
           if (!who.host) fail(403, 'Only the host can control the game.');
           if (action === 'start') { if (room.status !== 'lobby') fail(409, 'Game already started.'); if (!room.players.size) fail(409, 'Wait for at least one player.'); beginCountdown(room); }
-          if (action === 'open') { if (room.status !== 'preview') fail(409, 'The question is not in preview.'); openAnswers(room); }
+          if (action === 'open') { if (room.status === 'preview') openAnswers(room); else if (room.status !== 'question') fail(409, 'The question is not in preview.'); }
           if (action === 'next') { if (room.status === 'question') reveal(room); else if (room.status === 'reveal') advance(room); else fail(409, 'No next question available.'); }
           if (action === 'show-scoreboard') {
             if (room.status !== 'finished' || !room.quiz.questions.some(q => q.type !== 'poll') || room.scoreboardDeleted) fail(409, 'The final scoreboard is not available.');
