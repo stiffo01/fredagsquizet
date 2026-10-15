@@ -85,8 +85,14 @@ try {
 
   await host.evaluate(`quizMaps[0].map.fire('click',{latlng:L.latLng(0,0)}); document.querySelector('[data-map-distance]').value=1000; document.querySelector('#editor-form').requestSubmit();`);
   await host.wait('!!document.querySelector("[data-host]")');
+  await host.evaluate(`Array.from(document.querySelectorAll('.quiz-card')).find(el=>el.textContent.includes('Map browser test')).querySelector('[data-edit]').click()`);
+  await host.wait('document.querySelector("#quiz-title")?.value === "Map browser test"');
+  assert.equal(await host.evaluate('document.querySelector("#toast").hidden'),true,'opening a saved quiz for editing must not show an API/JSON error');
+  await host.evaluate(`location.hash='host'`);
+  await host.wait('!!document.querySelector("[data-host]")');
   await host.evaluate(`Array.from(document.querySelectorAll('.quiz-card')).find(el=>el.textContent.includes('Map browser test')).querySelector('[data-host]').click()`);
   await host.wait('!!document.querySelector(".pin-display strong")');
+  assert.equal(await host.evaluate('document.querySelector("#toast").hidden'),true,'opening a saved quiz from the library must not show an API/JSON error');
   await host.wait('document.querySelector(".qr-invite img")?.naturalWidth > 0');
   const pin=await host.evaluate('document.querySelector(".pin-display strong").textContent');
   async function join(name) {

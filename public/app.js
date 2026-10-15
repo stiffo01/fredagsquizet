@@ -32,7 +32,12 @@ async function api(path, {method='GET', body, token=ownerToken, signal} = {}) {
     : session?.role === 'host' && token === session.token ? {'X-Quiz-Host-Token':token}
     : token ? {Authorization:`Bearer ${token}`} : {};
   const response = await fetch(`/api${path}`, {method, cache:'no-store', signal, headers:{'Content-Type':'application/json', ...authHeaders}, ...(body ? {body:JSON.stringify(body)} : {})});
-  const data = await response.json();
+  const responseText = await response.text();
+  let data;
+  try { data = responseText ? JSON.parse(responseText) : {}; }
+  catch {
+    throw new Error(`The server returned a non-JSON response (HTTP ${response.status}) for ${path}. Check that the host is signed in and that /api requests reach Fredagsquizet.`);
+  }
   if (!response.ok) throw new Error(data.error || 'Something went wrong. Please try again.');
   return data;
 }
