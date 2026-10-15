@@ -87,6 +87,7 @@ try {
   await host.wait('!!document.querySelector("[data-host]")');
   await host.evaluate(`Array.from(document.querySelectorAll('.quiz-card')).find(el=>el.textContent.includes('Map browser test')).querySelector('[data-host]').click()`);
   await host.wait('!!document.querySelector(".pin-display strong")');
+  await host.wait('document.querySelector(".qr-invite img")?.naturalWidth > 0');
   const pin=await host.evaluate('document.querySelector(".pin-display strong").textContent');
   async function join(name) {
     const p=await page('#join/'+pin);
@@ -112,6 +113,11 @@ try {
   await host.wait('document.querySelector(".room [data-action=next]")?.textContent.includes("Show podium") && document.querySelectorAll(".room .quiz-map-pin").length === 1');
   assert.deepEqual(host.exceptions,[],'host must render the target pin after all players lock in');
   assert.equal(await alice.evaluate('document.querySelectorAll(".quiz-map-pin").length'),2);
+  await host.click('[data-action=next]');
+  await host.wait('document.body.innerText.includes("Thanks for playing!")');
+  await host.click('[data-action=show-scoreboard]');
+  await host.wait('!!document.querySelector("#scoreboard-reveal .podium-reveal")');
+  assert.deepEqual(host.exceptions,[],'host scoreboard must render without JSON or browser errors');
   for (const p of [host,alice,bob]) {
     assert.deepEqual(p.exceptions,[]);
     assert.ok(p.tileRequests.length > 0, 'browser must request map tiles');
@@ -135,7 +141,7 @@ try {
   assert.deepEqual(fallback.point,{lat:59,lng:18});
   assert.match(fallback.message,/WebGL/);
   assert.equal((await fetch(origin)).headers.get('referrer-policy'),'no-referrer','other resources keep the existing privacy policy');
-  console.log('PASS: Map editor, saving, preview secrecy, two players, host target-pin reveal, pending pin and zoom preservation, distance reveal, mobile layout, OpenFreeMap provider and attribution. Styles mocked; no OSM tile requests or screenshots captured.');
+  console.log('PASS: Map editor, saving, QR image, preview secrecy, two players, host target-pin reveal, podium scoreboard, pending pin and zoom preservation, distance reveal, mobile layout, OpenFreeMap provider and attribution. Styles mocked; no OSM tile requests or screenshots captured.');
   }
 } catch (error) {
   console.error(error); throw error;
