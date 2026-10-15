@@ -9,8 +9,9 @@ const temp = await mkdtemp(path.join(tmpdir(), 'fredagsquizet-browser-'));
 const local = createApp({dataDir:path.join(temp,'data'), hostUsername:'test', hostPassword:'test', startCountdownMs:0, firstPreviewMs:1500});
 await new Promise(resolve=>local.server.listen(0,'127.0.0.1',resolve));
 const origin = `http://127.0.0.1:${local.server.address().port}`;
-const browser = spawn(process.env.CHROMIUM || 'chromium',['--headless=new','--no-first-run','--no-default-browser-check',`--user-data-dir=${temp}/profile`,'--remote-debugging-port=0','about:blank'],{stdio:['ignore','ignore','pipe']});
+const browser = spawn(process.env.CHROMIUM || 'chromium',['--headless=new','--enable-unsafe-swiftshader','--use-angle=swiftshader','--no-first-run','--no-default-browser-check',`--user-data-dir=${temp}/profile`,'--remote-debugging-port=0','about:blank'],{stdio:['ignore','ignore','pipe']});
 const sockets=[];
+const liveMap = process.env.LIVE_MAP === '1';
 let endpoint;
 try {
   endpoint=await new Promise((resolve,reject)=>{
@@ -24,15 +25,19 @@ try {
     const target=await fetch(`${debugOrigin.origin}/json/new?${encodeURIComponent('about:blank')}`,{method:'PUT'}).then(r=>r.json());
     const socket=new WebSocket(target.webSocketDebuggerUrl);sockets.push(socket);
     await new Promise((resolve,reject)=>{socket.onopen=resolve;socket.onerror=reject;});
-    let id=0;const pending=new Map();const exceptions=[]; const tileRequests=[];
-    socket.onmessage=e=>{const m=JSON.parse(e.data);if(m.id){const p=pending.get(m.id);if(p){pending.delete(m.id);m.error?p.reject(new Error(m.error.message)):p.resolve(m.result);}}if(m.method==='Fetch.requestPaused') {
-      // Inspect real browser headers, but serve a fixture instead of fetching OSM tiles.
+    let id=0;const pending=new Map();const exceptions=[]; const tileRequests=[]; const mapResponses=[]; const networkFailures=[]; const requestUrls=new Map(); const forbiddenRequests=[];
+    socket.onmessage=e=>{const m=JSON.parse(e.data);if(m.id){const p=pending.get(m.id);if(p){pending.delete(m.id);m.error?p.reject(new Error(m.error.message)):p.resolve(m.result);}}if(m.method==='Network.requestWillBeSent') requestUrls.set(m.params.requestId,m.params.request.url);
+    if(m.method==='Network.loadingFailed') networkFailures.push({url:requestUrls.get(m.params.requestId),error:m.params.errorText});
+    if(m.method==='Network.requestWillBeSent' && new URL(m.params.request.url).hostname.endsWith('tile.openstreetmap.org')) forbiddenRequests.push(m.params.request.url);
+    if(m.method==='Network.responseReceived' && m.params.response.url.startsWith('https://tiles.openfreemap.org/')) mapResponses.push({url:m.params.response.url,status:m.params.response.status});
+    if(m.method==='Fetch.requestPaused') {
       tileRequests.push(m.params.request);
-      void call('Fetch.fulfillRequest',{requestId:m.params.requestId,responseCode:200,responseHeaders:[{name:'Content-Type',value:'image/png'}],body:'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGP4z8AAAAMBAQDJ/pLvAAAAAElFTkSuQmCC'});
+      const style = {version:8,sources:{},layers:[{id:'background',type:'background',paint:{'background-color':'#dcebf0'}}]};
+      void call('Fetch.fulfillRequest',{requestId:m.params.requestId,responseCode:200,responseHeaders:[{name:'Content-Type',value:'application/json'},{name:'Access-Control-Allow-Origin',value:'*'},{name:'Access-Control-Allow-Headers',value:'Authorization, Content-Type'},{name:'Access-Control-Allow-Methods',value:'GET, OPTIONS'}],body:Buffer.from(JSON.stringify(style)).toString('base64')});
     }if(m.method==='Runtime.exceptionThrown')exceptions.push(m.params.exceptionDetails);};
     const call=(method,params={})=>new Promise((resolve,reject)=>{const key=++id;pending.set(key,{resolve,reject});socket.send(JSON.stringify({id:key,method,params}));});
     const evaluate=async expression=>{const r=await call('Runtime.evaluate',{expression,returnByValue:true,awaitPromise:true});if(r.exceptionDetails)throw new Error(JSON.stringify(r.exceptionDetails));return r.result.value;};
-    const wait=async expression=>{for(let i=0;i<100;i++){if(await evaluate(expression))return;await new Promise(r=>setTimeout(r,50));}throw new Error(`Wait failed: ${expression}\nURL: ${await evaluate('location.href')}\n${await evaluate('document.body.innerText')}`);};
+    const wait=async expression=>{for(let i=0;i<(liveMap?600:100);i++){if(await evaluate(expression))return;await new Promise(r=>setTimeout(r,50));}throw new Error(`Wait failed: ${expression}\nNetwork failures: ${JSON.stringify(networkFailures)}\nResponses: ${JSON.stringify(mapResponses)}\nURL: ${await evaluate('location.href')}\n${await evaluate('document.body.innerText')}`);};
     const click=async selector=>{await wait(`!!document.querySelector(${JSON.stringify(selector)})`);await evaluate(`document.querySelector(${JSON.stringify(selector)}).click()`);};
     await call('Page.enable');
     if (hash === 'host#create') await call('Page.addScriptToEvaluateOnNewDocument',{source:`
@@ -40,8 +45,21 @@ try {
       localStorage.setItem('quizpop-draft-migration-test',JSON.stringify({title:'Unsaved work'}));
       sessionStorage.setItem('quizpop-answer-view-123456','answers-only');
     `});
-    await call('Fetch.enable',{patterns:[{urlPattern:'https://tile.openstreetmap.org/*',requestStage:'Request'}]}); await call('Runtime.enable'); await call('Network.enable'); if (hash.startsWith('host')) await call('Network.setExtraHTTPHeaders',{headers:{Authorization:'Basic '+Buffer.from('test:test').toString('base64')}}); await call('Page.navigate',{url:origin+'/'+hash}); await wait('document.readyState === "complete" && !!document.querySelector("#app")');
-    return {evaluate,wait,click,call,exceptions,tileRequests};
+    if (!liveMap) await call('Fetch.enable',{patterns:[{urlPattern:'https://tiles.openfreemap.org/*',requestStage:'Request'}]}); await call('Runtime.enable'); await call('Network.enable'); if (hash.startsWith('host')) await call('Network.setExtraHTTPHeaders',{headers:{Authorization:'Basic '+Buffer.from('test:test').toString('base64')}}); await call('Page.navigate',{url:origin+'/'+hash}); await wait('document.readyState === "complete" && !!document.querySelector("#app")');
+    if (hash.startsWith('host')) {
+      await call('Network.setExtraHTTPHeaders',{headers:{}});
+      await evaluate(`{
+        const originalFetch=window.fetch;
+        window.fetch=(url,options={})=>{
+          if(new URL(url instanceof Request ? url.url : url,location.href).origin===location.origin) {
+            const headers=new Headers(options.headers); headers.set('Authorization','Basic dGVzdDp0ZXN0');
+            return originalFetch(url,{...options,headers});
+          }
+          return originalFetch(url,options);
+        };
+      }`);
+    }
+    return {evaluate,wait,click,call,exceptions,tileRequests,mapResponses,forbiddenRequests};
   }
   const host=await page('host#create');
   await host.wait('!!document.querySelector("#quiz-title")');
@@ -53,6 +71,18 @@ try {
   ]`),['legacy-browser-owner-token','Unsaved work','answers-only',false]);
   await host.evaluate(`document.querySelector('#quiz-title').value='Map browser test'; document.querySelector('[data-question]').value='Find zero'; document.querySelector('[data-type]').value='map-pin'; document.querySelector('[data-type]').dispatchEvent(new Event('change'));`);
   await host.wait('!!document.querySelector(".leaflet-container")');
+  await host.wait(`quizMaps[0]?.map && Object.values(quizMaps[0].map._layers).some(layer=>layer.getMaplibreMap?.()?.loaded())`);
+  assert.ok(await host.evaluate(`document.querySelector('.leaflet-control-attribution').textContent.includes('OpenFreeMap')`));
+  if (liveMap) {
+    await host.wait(`Object.values(quizMaps[0].map._layers).some(layer=>layer.getMaplibreMap?.()?.queryRenderedFeatures().length > 0)`);
+    assert.ok(host.mapResponses.some(response=>response.url.includes('/planet') && response.status===200),'real vector source metadata loaded successfully');
+    assert.ok(host.mapResponses.every(response=>response.status===200),'all received provider responses succeeded');
+    assert.deepEqual(host.forbiddenRequests,[]);
+    assert.deepEqual(host.exceptions,[]);
+    console.log('PASS: Live OpenFreeMap style and vector tiles loaded and geographic features rendered; no OSM tile requests. No screenshots captured.');
+    process.exitCode = 0;
+  } else {
+
   await host.evaluate(`quizMaps[0].map.fire('click',{latlng:L.latLng(0,0)}); document.querySelector('[data-map-distance]').value=1000; document.querySelector('#editor-form').requestSubmit();`);
   await host.wait('!!document.querySelector("[data-host]")');
   await host.evaluate(`Array.from(document.querySelectorAll('.quiz-card')).find(el=>el.textContent.includes('Map browser test')).querySelector('[data-host]').click()`);
@@ -82,13 +112,28 @@ try {
   for (const p of [host,alice,bob]) {
     assert.deepEqual(p.exceptions,[]);
     assert.ok(p.tileRequests.length > 0, 'browser must request map tiles');
-    for (const request of p.tileRequests) {
-      const referer = Object.entries(request.headers).find(([name])=>name.toLowerCase()==='referer')?.[1];
-      assert.equal(referer,origin+'/', 'tile requests identify the site without leaking paths or game tokens');
-    }
+    assert.deepEqual(p.forbiddenRequests,[], 'never request blocked OSM raster tiles');
+    assert.ok(p.tileRequests.every(request=>request.url.startsWith('https://tiles.openfreemap.org/')));
   }
+  const fallback = await host.evaluate(`(() => {
+    const originalMap = maplibregl.Map;
+    const container = document.createElement('section');
+    container.innerHTML = '<div class="quiz-map"></div><p data-map-status></p>' + locationFields();
+    document.body.append(container);
+    try {
+      maplibregl.Map = class { constructor() { throw new Error('WebGL unavailable in test'); } };
+      const widget = mountQuizMap(container.firstElementChild,{key:'no-webgl',onSelect:point=>setLocationFields(container,point)});
+      widget.select({lat:59,lng:18});
+      const result = {point:readLocation(container),message:container.querySelector('[data-map-status]').textContent};
+      clearQuizMaps();
+      return result;
+    } finally { maplibregl.Map = originalMap; container.remove(); }
+  })()`);
+  assert.deepEqual(fallback.point,{lat:59,lng:18});
+  assert.match(fallback.message,/WebGL/);
   assert.equal((await fetch(origin)).headers.get('referrer-policy'),'no-referrer','other resources keep the existing privacy policy');
-  console.log('PASS: Map editor, saving, preview secrecy, two players, pending pin and zoom preservation, distance reveal, mobile layout, origin-only tile Referer. Tiles mocked; no OSM requests or screenshots captured.');
+  console.log('PASS: Map editor, saving, preview secrecy, two players, pending pin and zoom preservation, distance reveal, mobile layout, OpenFreeMap provider and attribution. Styles mocked; no OSM tile requests or screenshots captured.');
+  }
 } catch (error) {
   console.error(error); throw error;
 } finally {

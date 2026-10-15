@@ -7,17 +7,31 @@ function clearQuizMaps() {
 }
 function mountQuizMap(element, {key, point, target, onSelect}) {
   const view = mapViews.get(key);
-  const map = L.map(element, {worldCopyJump:true, minZoom:2, maxZoom:19}).setView(view?.center || (target || point || [20,0]), view?.zoom ?? (target || point ? 5 : 2));
+  const map = L.map(element, {worldCopyJump:true, minZoom:2, maxZoom:19, maxBounds:[[-85,-Infinity],[85,Infinity]], maxBoundsViscosity:1}).setView(view?.center || (target || point || [20,0]), view?.zoom ?? (target || point ? 5 : 2));
   quizMaps.push({map, key});
-  L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
-    // OSM requires a Referer; override the page's no-referrer policy only for tiles.
-    // Send the origin, never host paths, game PINs, or session tokens.
-    referrerPolicy:'strict-origin',
-    maxZoom:19, attribution:'&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
-  }).addTo(map).on('tileerror', () => {
-    const status = element.parentElement.querySelector('[data-map-status]');
-    if (status) status.textContent = 'Map tiles could not load. Check your internet connection; coordinates can still be entered below.';
-  });
+  const status = element.parentElement.querySelector('[data-map-status]');
+  const showMapError = () => {
+    if (status) status.textContent = 'The OpenFreeMap map could not load. Check that your browser allows WebGL and access to tiles.openfreemap.org. You can still enter coordinates below.';
+  };
+  let basemap;
+  try {
+    // OpenFreeMap serves its own vector tiles; never request OSM's public raster tiles.
+    basemap = L.maplibreGL({
+      style:'https://tiles.openfreemap.org/styles/liberty',
+      attributionControl:{customAttribution:'<a href="https://openfreemap.org/">OpenFreeMap</a> · © <a href="https://openmaptiles.org/">OpenMapTiles</a> · © <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'}
+    });
+    basemap.addTo(map);
+    const renderer = basemap.getMaplibreMap();
+    renderer.on('error', showMapError);
+  } catch (error) {
+    if (basemap && map.hasLayer(basemap)) {
+      // A failed WebGL constructor leaves a partially attached Leaflet layer.
+      if (!basemap.getMaplibreMap()) basemap.onRemove = () => basemap.getContainer()?.remove();
+      map.removeLayer(basemap);
+    }
+    console.error('Map initialization failed', error);
+    showMapError();
+  }
   const marker = (location, label, correct=false) => L.marker(location, {icon:L.divIcon({className:'quiz-map-pin', html:correct?'🎯':'📍', iconSize:[30,36], iconAnchor:[15,32]}), title:label}).addTo(map).bindTooltip(label);
   let selected = point ? marker(point, 'Your pin') : null;
   if (target) marker(target, 'Correct location', true);
