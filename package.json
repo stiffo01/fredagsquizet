@@ -11,7 +11,8 @@
     "start": "node server.mjs",
     "test": "node --test test/backend.test.mjs",
     "test:browser": "node test/browser-smoke.mjs",
-    "test:map-browser": "node test/map-browser.mjs"
+    "test:map-browser": "node test/map-browser.mjs",
+    "test:sync-browser": "node test/sync-browser.mjs"
   },
   "dependencies": {
     "qrcode": "^1.5.4"

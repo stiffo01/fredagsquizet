@@ -22,16 +22,16 @@ for (const storage of [localStorage, sessionStorage]) {
 }
 let ownerToken = localStorage.getItem('fredagsquizet-owner');
 if (!ownerToken) { ownerToken = randomToken(); localStorage.setItem('fredagsquizet-owner', ownerToken); }
-let stream, roomState, session, timer, streamWatchdog, statePoll, streamLastSignal = 0, autosaveTimer, autosaveTask, autosavePending = false, quizzes = [], draft, routeVersion = 0, playerAnswerOnly = false;
+let stream, roomState, session, timer, roomSyncCleanup, statePoll, autosaveTimer, autosaveTask, autosavePending = false, quizzes = [], draft, routeVersion = 0, playerAnswerOnly = false;
 const questionTypes = {'quiz':'Multiple choice', 'true-false':'True or false', 'type-answer':'Type an answer', 'poll':'Poll', 'map-pin':'Pin on a map'};
 const playerEmojis = ['😀', '😎', '🤓', '🥳', '🐸', '🦊', '🐼', '🐙', '🦄', '🐧', '🐢', '🦖', '🍕', '🚀', '⭐', '👾'];
 const newQuestion = () => ({type:'quiz', question:'', image:'', imageAlt:'', revealImage:'', revealImageAlt:'', showRevealImage:false, answers:['','','',''], correctIndex:0, timeLimit:20});
 function toast(message) { const el = document.querySelector('#toast'); el.textContent = message; el.hidden = false; clearTimeout(toast.timeout); toast.timeout = setTimeout(() => el.hidden = true, 6000); }
-async function api(path, {method='GET', body, token=ownerToken} = {}) {
+async function api(path, {method='GET', body, token=ownerToken, signal} = {}) {
   const authHeaders = token === ownerToken ? {'X-Quiz-Owner':token}
     : session?.role === 'host' && token === session.token ? {'X-Quiz-Host-Token':token}
     : token ? {Authorization:`Bearer ${token}`} : {};
-  const response = await fetch(`/api${path}`, {method, headers:{'Content-Type':'application/json', ...authHeaders}, ...(body ? {body:JSON.stringify(body)} : {})});
+  const response = await fetch(`/api${path}`, {method, cache:'no-store', signal, headers:{'Content-Type':'application/json', ...authHeaders}, ...(body ? {body:JSON.stringify(body)} : {})});
   const data = await response.json();
   if (!response.ok) throw new Error(data.error || 'Something went wrong. Please try again.');
   return data;
@@ -318,33 +318,62 @@ function editor() {
   }); };
 }
 function saveSession(value) { session = value; sessionStorage.setItem(`fredagsquizet-${value.role}-${value.pin}`,JSON.stringify(value)); location.hash=`room/${value.role}/${value.pin}`; }
+function applyRoomState(latest, version) {
+  if (version !== routeVersion) return false;
+  if (roomState && latest.pin === roomState.pin && latest.revision <= roomState.revision) return false;
+  roomState = latest;
+  renderRoom();
+  return true;
+}
 async function connectRoom(role, pin, version) {
   const stored = sessionStorage.getItem(`fredagsquizet-${role}-${pin}`);
   if (!stored) { location.href = role==='host'?'/host#host':`/#join/${pin}`; return; }
   session = JSON.parse(stored);
+  const token = session.token;
   playerAnswerOnly = role === 'player' && sessionStorage.getItem(`fredagsquizet-answer-view-${pin}`) === 'answers-only';
-  roomState = await api(`/rooms/${pin}/state`,{token:session.token});
-  if (version !== routeVersion) return;
-  renderRoom();
-  streamLastSignal = Date.now();
-  const stopStatePoll = () => { clearInterval(statePoll); statePoll = null; };
+  const initial = await api(`/rooms/${pin}/state`,{token});
+  if (!applyRoomState(initial, version)) return;
+  let fetching = false, refreshPending = false, controller;
   const pollState = async () => {
+    if (version !== routeVersion) return;
+    if (fetching) { refreshPending = true; return; }
+    fetching = true;
+    controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 8000);
     try {
-      const latest = await api(`/rooms/${pin}/state`,{token:session.token});
+      const latest = await api(`/rooms/${pin}/state`,{token, signal:controller.signal});
       if (version !== routeVersion) return;
-      if (JSON.stringify(latest) !== JSON.stringify(roomState)) { roomState = latest; renderRoom(); }
-    } catch {}
+      applyRoomState(latest, version);
+      const el = document.querySelector('.connection'); if (el) el.textContent = '● Connected';
+    } catch {
+      if (version === routeVersion) { const el = document.querySelector('.connection'); if (el) el.textContent = 'Reconnecting…'; }
+    } finally {
+      clearTimeout(timeout);
+      fetching = false;
+      if (refreshPending && version === routeVersion) { refreshPending = false; void pollState(); }
+    }
   };
-  const startStatePoll = () => { if (!statePoll) { const el=document.querySelector('.connection'); if(el) el.textContent='● Syncing'; pollState(); statePoll = setInterval(pollState,1500); } };
-  const markStreamAlive = () => { streamLastSignal = Date.now(); stopStatePoll(); const el=document.querySelector('.connection'); if(el) el.textContent='● Connected'; };
-  stream = new EventSource(`/api/rooms/${pin}/events?token=${encodeURIComponent(session.token)}`);
-  stream.addEventListener('state',event => { if(version !== routeVersion) return; markStreamAlive(); roomState = JSON.parse(event.data); renderRoom(); });
-  stream.addEventListener('ping',markStreamAlive);
-  stream.onopen = () => { markStreamAlive(); const el=document.querySelector('.connection'); if(el) el.textContent='● Connected'; };
-  stream.onerror = () => { const el=document.querySelector('.connection'); if(el) el.textContent='Reconnecting…'; startStatePoll(); };
-  streamWatchdog = setInterval(() => { if(Date.now()-streamLastSignal>5000) startStatePoll(); },1000);
+  // Corporate proxies may buffer SSE and replay old questions and heartbeats.
+  // Treat events only as refresh hints; always read the current server snapshot.
+  stream = new EventSource(`/api/rooms/${pin}/events?token=${encodeURIComponent(token)}`);
+  stream.addEventListener('state',pollState);
+  stream.onopen = pollState;
+  stream.onerror = pollState;
+  // Keep polling even when a buffered stream appears healthy.
+  statePoll = setInterval(pollState,1500);
+  const resume = () => { if (!document.hidden) void pollState(); };
+  window.addEventListener('focus',resume);
+  window.addEventListener('online',resume);
+  document.addEventListener('visibilitychange',resume);
+  roomSyncCleanup = () => {
+    controller?.abort();
+    window.removeEventListener('focus',resume);
+    window.removeEventListener('online',resume);
+    document.removeEventListener('visibilitychange',resume);
+  };
   timer = setInterval(updateTimer,250);
 }
+
 function leaderboard(players, {full=false, showCorrect=false}={}) {
   const rows = full ? players : players.slice(0,10);
   return `<div class="ranking${showCorrect?' final-ranking':''}">${rows.map((p,i)=>`<div class="rank-row"><span class="position">${p.rank || i+1}</span><span class="player-emoji" aria-hidden="true">${escapeHTML(p.emoji || '😀')}</span><strong>${escapeHTML(p.nickname)}${p.id===roomState.self?.id?' (you)':''}</strong>${showCorrect?`<span class="correct-count">${p.correctAnswers} correct</span>`:''}<span class="score">${p.score.toLocaleString()} <small>pts</small></span></div>`).join('')}</div>`;
@@ -418,7 +447,7 @@ function renderRoom() {
   }
   const submitAnswer = async answer => {
     try { await api(`/rooms/${s.pin}/answer`, {method:'POST', token, body:{...answer, questionIndex:s.questionIndex}}); }
-    finally { const result = await api(`/rooms/${s.pin}/state`, {token}); if (version === routeVersion) { roomState = result; renderRoom(); } }
+    finally { const result = await api(`/rooms/${s.pin}/state`, {token}); if (version === routeVersion) { if (!applyRoomState(result, version)) renderRoom(); } }
   };
   const mapElement = document.querySelector('#answer-map');
   if (mapElement) {
@@ -443,7 +472,7 @@ function renderRoom() {
   app.querySelectorAll('[data-action]').forEach(button=>button.onclick=()=>run(button,async()=>{
     if(button.dataset.action==='end'&&!confirm('End the game now and show final scores?'))return;
     if(button.dataset.action==='clear-scoreboard'&&!confirm('Delete the final scoreboard and clear all player scores for this game? This cannot be undone.'))return;
-    const result=await api(`/rooms/${s.pin}/${button.dataset.action}`,{method:'POST',token}); if(version !== routeVersion) return; roomState=result;renderRoom();
+    const result=await api(`/rooms/${s.pin}/${button.dataset.action}`,{method:'POST',token}); applyRoomState(result, version);
   }));
   app.querySelectorAll('[data-toggle-answer-view]').forEach(button=>button.onclick=()=>{
     playerAnswerOnly = !playerAnswerOnly;
@@ -477,7 +506,7 @@ function updateTimer() {
 }
 async function route() {
   clearQuizMaps();
-  const version=++routeVersion;stream?.close();stream=null;clearInterval(timer);clearInterval(streamWatchdog);clearInterval(statePoll);statePoll=null;roomState=null;
+  const version=++routeVersion;stream?.close();stream=null;clearInterval(timer);roomSyncCleanup?.();roomSyncCleanup=null;clearInterval(statePoll);statePoll=null;roomState=null;
   const [page,arg,pin]=location.hash.slice(1).split('/');
   document.body.classList.toggle('playing-game', page === 'room');
   setGithubActive(page !== 'room');

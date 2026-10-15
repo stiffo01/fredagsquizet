@@ -98,7 +98,7 @@ export function createApp({ dataDir = process.env.DATA_DIR || path.join(baseDir,
   const identity = (room, token) => token && token === room.hostToken ? { host: true } : room.players.get(token);
   const state = (room, who) => {
     const question = room.quiz.questions[room.index];
-    const result = { pin: room.pin, status: room.status, quizTitle: room.quiz.title, hasScoredQuestions: room.quiz.questions.some(q => q.type !== 'poll'), questionIndex: room.index, questionCount: room.quiz.questions.length, players: rank(room), leaderboard: room.scoreboardDeleted ? [] : rank(room), answeredCount: [...room.players.values()].filter(p => p.answer !== undefined).length, scoreboardVisible: room.scoreboardVisible === true, scoreboardDeleted: room.scoreboardDeleted === true, scoreboardShownAt: room.scoreboardVisible ? room.scoreboardShownAt : null, host: !!who.host };
+    const result = { revision: room.revision, pin: room.pin, status: room.status, quizTitle: room.quiz.title, hasScoredQuestions: room.quiz.questions.some(q => q.type !== 'poll'), questionIndex: room.index, questionCount: room.quiz.questions.length, players: rank(room), leaderboard: room.scoreboardDeleted ? [] : rank(room), answeredCount: [...room.players.values()].filter(p => p.answer !== undefined).length, scoreboardVisible: room.scoreboardVisible === true, scoreboardDeleted: room.scoreboardDeleted === true, scoreboardShownAt: room.scoreboardVisible ? room.scoreboardShownAt : null, host: !!who.host };
     if (room.status === 'countdown') result.countdownEndsAt = room.countdownEndsAt;
     if (question && ['preview', 'question', 'reveal', 'finished'].includes(room.status)) {
       result.question = { type: question.type ?? 'quiz', question: question.question, image: question.image || '', imageAlt: question.imageAlt || '', timeLimit: question.timeLimit };
@@ -126,7 +126,7 @@ export function createApp({ dataDir = process.env.DATA_DIR || path.join(baseDir,
     }
     return result;
   };
-  const broadcast = room => { for (const client of room.clients) client.res.write(`event: state\ndata: ${JSON.stringify(state(room, client.who))}\n\n`); };
+  const broadcast = room => { room.revision++; for (const client of room.clients) client.res.write(`event: state\ndata: ${JSON.stringify(state(room, client.who))}\n\n`); };
   const reveal = room => { if (room.status !== 'question') return; clearTimeout(room.timer); for (const p of room.players.values()) p.score += p.points || 0; room.status = 'reveal'; broadcast(room); };
   const showPreview = (room, automatic = false) => {
     clearTimeout(room.timer);
@@ -250,7 +250,7 @@ export function createApp({ dataDir = process.env.DATA_DIR || path.join(baseDir,
           else quiz = saved.find(q => q.id === input.quizId && !q.hiddenSample);
           if (!quiz) fail(404, 'Quiz not found.');
           let pin; do { pin = String(randomInt(100000, 1000000)); } while (rooms.has(pin));
-          const room = { pin, quiz: structuredClone(quiz), hostToken: secret(), players: new Map(), clients: new Set(), status: 'lobby', index: -1, touchedAt: Date.now() };
+          const room = { revision: 0, pin, quiz: structuredClone(quiz), hostToken: secret(), players: new Map(), clients: new Set(), status: 'lobby', index: -1, touchedAt: Date.now() };
           rooms.set(pin, room); return send(res, 201, { pin, hostToken: room.hostToken });
         }
         const room = rooms.get(parts[2]); if (!room) fail(404, 'Game not found. Check your PIN.');

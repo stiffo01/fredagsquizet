@@ -99,3 +99,5 @@ Run `npm run test:map-browser` for the DOM-only map editor and two-player gamepl
 Map tile requests send only the site origin as their Referer to meet OpenStreetMap’s usage policy; the rest of the app retains `no-referrer`. The map browser test intercepts tile requests and checks that header using local fixture images, without downloading tiles from OpenStreetMap.
 
 For existing servers, follow [Rename an existing deployment without losing quizzes](docs/rename-deployment.md). Reusing the existing volume as an explicitly named external volume is the simplest migration option.
+
+Live rooms poll the current server state every 1.5 seconds, even when the event stream is connected. Stream events trigger a fresh state request instead of replaying their payload, and revision numbers prevent delayed responses from replacing newer questions. Returning to a tab or reconnecting the network triggers an immediate refresh. Run `npm run test:sync-browser` for the DOM-only regression test covering buffered streams and out-of-order responses.
