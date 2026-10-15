@@ -102,6 +102,8 @@ try {
   await host.wait('!!document.querySelector("#answer-map")');
   assert.equal(await host.evaluate('document.documentElement.scrollHeight <= innerHeight'),true,'host map question must fit without vertical scrolling');
   assert.equal(await host.evaluate('document.querySelector(".map-host-actions").getBoundingClientRect().bottom <= innerHeight'),true,'host map actions must remain visible');
+  const hiddenLabels=await alice.evaluate(`(() => { const changes=[]; hideMapLabels({getStyle:()=>({layers:[{id:'city-label',type:'symbol',layout:{'text-field':'{name}'}},{id:'road-line',type:'line',layout:{}}]}),setLayoutProperty:(...args)=>changes.push(args)}); return changes; })()`);
+  assert.deepEqual(hiddenLabels,[['city-label','text-field','']],'player map label text should be suppressed while preserving non-label layers');
   await alice.call('Emulation.setDeviceMetricsOverride',{width:390,height:844,deviceScaleFactor:1,mobile:true});
   assert.equal(await alice.evaluate('document.documentElement.scrollWidth <= innerWidth'),true);
   await alice.evaluate(`quizMaps[0].map.fire('click',{latlng:L.latLng(0,1)}); quizMaps[0].map.setView([0,1],6,{animate:false}); void 0;`);

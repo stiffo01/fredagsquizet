@@ -548,7 +548,7 @@ function renderRoom() {
     const key = `${s.pin}:${s.questionIndex}`, form = document.querySelector('#map-answer-form');
     const point = s.self?.answerLocation || (form ? pendingPins.get(key) : undefined);
     if (form && point) setLocationFields(form, point);
-    const widget = mountQuizMap(mapElement, {key:`room:${key}:${s.status}`, point, target:isReveal ? q.target : undefined, onSelect:form ? point => { pendingPins.set(key,point); setLocationFields(form,point); form.querySelector('.map-lock-button').disabled=false; } : undefined});
+    const widget = mountQuizMap(mapElement, {key:`room:${key}:${s.status}`, point, target:isReveal ? q.target : undefined, hideLabels:!host && !isReveal, onSelect:form ? point => { pendingPins.set(key,point); setLocationFields(form,point); form.querySelector('.map-lock-button').disabled=false; } : undefined});
     if (form) {
       const coordinateToggle = form.querySelector('.map-coordinate-toggle');
       const coordinates = form.querySelector('.map-coordinates');

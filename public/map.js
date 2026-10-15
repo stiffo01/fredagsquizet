@@ -5,7 +5,15 @@ function clearQuizMaps() {
   for (const {map, key} of quizMaps) { mapViews.set(key, {center:map.getCenter(), zoom:map.getZoom()}); map.remove(); }
   quizMaps.length = 0;
 }
-function mountQuizMap(element, {key, point, target, onSelect}) {
+function hideMapLabels(renderer) {
+  const layers = renderer.getStyle()?.layers || [];
+  for (const layer of layers) {
+    if (layer.type === 'symbol' && layer.layout?.['text-field'] !== undefined) {
+      renderer.setLayoutProperty(layer.id, 'text-field', '');
+    }
+  }
+}
+function mountQuizMap(element, {key, point, target, onSelect, hideLabels = false}) {
   const view = mapViews.get(key);
   const map = L.map(element, {worldCopyJump:true, minZoom:2, maxZoom:19, maxBounds:[[-85,-Infinity],[85,Infinity]], maxBoundsViscosity:1}).setView(view?.center || (target || point || [20,0]), view?.zoom ?? (target || point ? 5 : 2));
   quizMaps.push({map, key});
@@ -22,6 +30,10 @@ function mountQuizMap(element, {key, point, target, onSelect}) {
     });
     basemap.addTo(map);
     const renderer = basemap.getMaplibreMap();
+    if (hideLabels) {
+      renderer.on('style.load', () => hideMapLabels(renderer));
+      if (renderer.isStyleLoaded()) hideMapLabels(renderer);
+    }
     renderer.on('error', showMapError);
   } catch (error) {
     if (basemap && map.hasLayer(basemap)) {
