@@ -27,3 +27,5 @@
 .map-coordinates label { flex: 1; min-width: 0; }
 .quiz-map:focus-visible { outline: 3px solid #ffb900; outline-offset: 3px; }
 .quiz-map .leaflet-control-attribution { font-size: 11px; }
+
+.lobby-invite{display:flex;align-items:center;justify-content:center;gap:clamp(12px,4vw,32px);margin:12px auto 14px}.lobby-invite .pin-display{margin:0;padding:18px 26px}.lobby-invite .pin-display strong{font-size:clamp(36px,6vw,64px);letter-spacing:clamp(1px,.7vw,7px)}.lobby-invite .qr-invite{margin:0;padding:10px}.lobby-invite .qr-invite img{width:clamp(136px,18vw,184px);height:clamp(136px,18vw,184px)}.lobby-invite .qr-invite p{margin-top:5px}.room .player-list{margin:12px auto 16px;min-height:76px}@media(max-width:600px){.lobby-invite{gap:10px}.lobby-invite .pin-display{padding:16px 12px}.lobby-invite .pin-display strong{font-size:clamp(32px,8vw,48px);letter-spacing:1px}.lobby-invite .qr-invite{padding:7px}.lobby-invite .qr-invite img{width:clamp(120px,36vw,148px);height:clamp(120px,36vw,148px)}}
