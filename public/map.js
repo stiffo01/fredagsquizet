@@ -48,7 +48,7 @@ function mountQuizMap(element, {key, point, target, onSelect, hideLabels = false
   let selected = point ? marker(point, 'Your pin') : null;
   if (target) marker(target, 'Correct location', true);
   if (point && target) {
-    L.polyline([point,target], {color:'#46178f',dashArray:'6 6'}).addTo(map);
+    L.polyline([point,target], {color:'#cc4202',dashArray:'6 6'}).addTo(map);
     map.fitBounds(L.latLngBounds([point,target]), {padding:[40,40],maxZoom:12});
   }
   const select = location => {
