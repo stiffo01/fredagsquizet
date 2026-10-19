@@ -33,6 +33,7 @@ function toast(message) { const el = document.querySelector('#toast'); el.textCo
 async function api(path, {method='GET', body, token=ownerToken, signal} = {}) {
   const authHeaders = token === ownerToken ? {'X-Quiz-Owner':token}
     : session?.role === 'host' && token === session.token ? {'X-Quiz-Host-Token':token}
+    : session?.role === 'test' && [session.token, session.hostToken].includes(token) ? {'X-Quiz-Host-Token':token}
     : token ? {Authorization:`Bearer ${token}`} : {};
   const response = await fetch(`/api${path}`, {method, cache:'no-store', signal, headers:{'Content-Type':'application/json', ...authHeaders}, ...(body ? {body:JSON.stringify(body)} : {})});
   const responseText = await response.text();
@@ -161,6 +162,12 @@ function nicknamePage(pin) {
     saveSession({pin, token:result.playerToken, role:'player'});
   }); };
 }
+// A test run is a private room with one test player; the host token in the session drives the game from the player's screen.
+async function startTestRun(source) {
+  const room = await api('/rooms', {method:'POST', body:{...source, test:true}});
+  const {playerToken} = await api(`/rooms/${room.pin}/join`, {method:'POST', token:null, body:{nickname:'Test player', emoji:'🤓'}});
+  saveSession({pin:room.pin, token:playerToken, hostToken:room.hostToken, role:'test', returnTo:location.hash || '#host'});
+}
 async function leaderboardHistory(version) {
   app.innerHTML = '<section class="shell"><span class="spinner"></span><p style="text-align:center">Opening the leaderboards…</p></section>';
   const entries = await api('/history'); if (version !== routeVersion) return;
@@ -168,15 +175,23 @@ async function leaderboardHistory(version) {
   app.innerHTML = `<section class="shell"><div class="topline"><div><p class="eyebrow">Hall of fame</p><h1>Leaderboards</h1><p>Final scoreboards from every finished game, newest first.</p></div><a class="btn ghost" href="/host#host">Back to library</a></div><section class="games-admin"><div class="game-admin-grid">${cards}</div></section></section>`;
   app.querySelectorAll('[data-remove-history]').forEach(button => button.onclick = () => run(button,async()=>{ if(!confirm('Remove this leaderboard from the history? This cannot be undone.'))return; await api(`/history/${button.dataset.removeHistory}`,{method:'DELETE'}); await leaderboardHistory(routeVersion); }));
 }
+async function gamesPage(version) {
+  app.innerHTML = '<section class="shell"><span class="spinner"></span><p style="text-align:center">Opening your games…</p></section>';
+  const activeGames = await api('/rooms'); if (version !== routeVersion) return;
+  const card = game => `<article class="card game-admin-card"><div class="game-admin-heading"><div><span class="badge">${game.status==='finished'?(game.scoreboardDeleted?'SCOREBOARD REMOVED':'FINISHED'):game.status==='lobby'?'WAITING FOR PLAYERS':'LIVE GAME'}</span><h3>${escapeHTML(game.quizTitle)}</h3><p class="small">PIN ${escapeHTML(game.pin)} · ${game.playerCount} ${game.playerCount===1?'player':'players'} · ${escapeHTML(game.status)}</p></div><button class="btn subtle" data-open-game="${escapeHTML(game.pin)}">Open game</button></div>${game.scoreboardAvailable?`<div class="admin-scoreboard"><h4>Final scoreboard</h4>${game.leaderboard.map(player=>`<div class="admin-score-row"><span>${player.rank}.</span><span>${escapeHTML(player.emoji||'😀')} ${escapeHTML(player.nickname)}</span><span>${player.correctAnswers} correct</span><b>${player.score.toLocaleString()} pts</b></div>`).join('')}</div>`:''}<div class="actions admin-game-actions">${game.status!=='finished'?`<button class="btn danger" data-stop-game="${escapeHTML(game.pin)}">Stop quiz</button>`:''}${game.scoreboardAvailable?`<button class="btn subtle" data-remove-scoreboard="${escapeHTML(game.pin)}">Remove scoreboard</button>`:''}</div></article>`;
+  const section = (title, games, empty) => `<section class="games-admin"><div class="games-admin-title"><h2>${title}</h2></div><div class="game-admin-grid">${games.length ? games.map(card).join('') : `<p class="small muted-white">${empty}</p>`}</div></section>`;
+  app.innerHTML = `<section class="shell"><div class="topline"><div><p class="eyebrow">The host's corner</p><h1>Games</h1><p>Running games and finished games with their scoreboards.</p></div><div class="actions" style="margin-top:0"><button class="btn ghost" id="refresh-games">Refresh</button><a class="btn light" href="/host#host">Back to library</a></div></div>${section('Active games', activeGames.filter(game => game.status !== 'finished'), 'No games are running right now.')}${section('Finished games', activeGames.filter(game => game.status === 'finished'), 'No finished games yet. Finished games stay here until 6 hours after their last activity; their scoreboards are kept on the Leaderboards page.')}</section>`;
+  document.querySelector('#refresh-games').onclick = () => gamesPage(routeVersion);
+  app.querySelectorAll('[data-open-game]').forEach(button => button.onclick = () => { const game=activeGames.find(item=>item.pin===button.dataset.openGame); saveSession({pin:game.pin,token:game.hostToken,role:'host'}); });
+  app.querySelectorAll('[data-stop-game]').forEach(button => button.onclick = () => run(button,async()=>{ if(!confirm('Stop this quiz now? Players will see the finished game.'))return; await api(`/rooms/${button.dataset.stopGame}/end`,{method:'POST'}); await gamesPage(routeVersion); }));
+  app.querySelectorAll('[data-remove-scoreboard]').forEach(button => button.onclick = () => run(button,async()=>{ if(!confirm('Remove this scoreboard and clear the players’ points? This cannot be undone.'))return; await api(`/rooms/${button.dataset.removeScoreboard}/clear-scoreboard`,{method:'POST'}); await gamesPage(routeVersion); }));
+}
 async function library(version) {
   app.innerHTML = '<section class="shell"><span class="spinner"></span><p style="text-align:center">Opening your quiz library…</p></section>';
   const [quizList, activeGames] = await Promise.all([api('/quizzes'), api('/rooms')]); quizzes = quizList; if (version !== routeVersion) return;
-  const gameCards = activeGames.length ? activeGames.map(game => `<article class="card game-admin-card"><div class="game-admin-heading"><div><span class="badge">${game.status==='finished'?(game.scoreboardDeleted?'SCOREBOARD REMOVED':'FINISHED'):game.status==='lobby'?'WAITING FOR PLAYERS':'LIVE GAME'}</span><h3>${escapeHTML(game.quizTitle)}</h3><p class="small">PIN ${escapeHTML(game.pin)} · ${game.playerCount} ${game.playerCount===1?'player':'players'} · ${escapeHTML(game.status)}</p></div><button class="btn subtle" data-open-game="${escapeHTML(game.pin)}">Open game</button></div>${game.scoreboardAvailable?`<div class="admin-scoreboard"><h4>Final scoreboard</h4>${game.leaderboard.map(player=>`<div class="admin-score-row"><span>${player.rank}.</span><span>${escapeHTML(player.emoji||'😀')} ${escapeHTML(player.nickname)}</span><span>${player.correctAnswers} correct</span><b>${player.score.toLocaleString()} pts</b></div>`).join('')}</div>`:''}<div class="actions admin-game-actions">${game.status!=='finished'?`<button class="btn danger" data-stop-game="${escapeHTML(game.pin)}">Stop quiz</button>`:''}${game.scoreboardAvailable?`<button class="btn subtle" data-remove-scoreboard="${escapeHTML(game.pin)}">Remove scoreboard</button>`:''}</div></article>`).join('') : '<p class="small muted-white">No active quizzes or saved scoreboards.</p>';
-  app.innerHTML = `<section class="shell"><div class="topline"><div><p class="eyebrow">The host's corner</p><h1>Your next great game.</h1><p>Pick a quiz, share the PIN, and bring the room to life.</p></div><div class="actions" style="margin-top:0"><a class="btn ghost" href="#history">🏆 Leaderboards</a><a class="btn light" href="#create">＋ Create quiz</a></div></div><section class="games-admin"><div class="games-admin-title"><h2>Active quizzes and scoreboards</h2><button class="btn ghost" id="refresh-games">Refresh</button></div><div class="game-admin-grid">${gameCards}</div></section><div class="quiz-grid">${quizzes.map((q,i) => `<article class="card quiz-card"><div class="quiz-art">${q.coverImage ? `<img class="quiz-cover-thumb" src="${escapeHTML(q.coverImage)}" alt="${escapeHTML(q.coverImageAlt || `${q.title} cover`)}">` : `<span aria-hidden="true">${['✦','◎','✷'][i%3]}</span>`}</div><div class="quiz-body"><div><span class="badge">${q.id==='feature-test'?'FEATURE TEST':q.id==='sample'?'READY TO PLAY':'YOUR CREATION'}</span></div><h2 style="margin-top:14px">${escapeHTML(q.title)}</h2>${q.id==='feature-test'?'<p class="small">Try previews, pictures, question types, polls, and scoring with your group.</p>':''}${q.creator?`<p class="small quiz-creator">Created by ${escapeHTML(q.creator)}</p>`:''}<span class="small">${q.questions.length} questions · ${Math.ceil(q.questions.reduce((n,q)=>n+q.timeLimit,0)/60)} min of play</span><div class="actions"><button class="btn primary" data-host="${escapeHTML(q.id)}">${q.id==='feature-test'?'Host test →':'Host live →'}</button><button class="btn subtle" data-edit="${escapeHTML(q.id)}">${q.id==='sample'||q.id==='feature-test'?'Copy':'Edit'}</button>${q.id==='feature-test'?'':`<button class="btn subtle" data-delete="${escapeHTML(q.id)}" aria-label="Remove ${escapeHTML(q.title)}">×</button>`}</div></div></article>`).join('')}</div><p class="small muted-white" style="margin-top:28px">Your quizzes are saved on this server. Use this browser to manage them.</p></section>`;
-  document.querySelector('#refresh-games').onclick = () => library(routeVersion);
-  app.querySelectorAll('[data-open-game]').forEach(button => button.onclick = () => { const game=activeGames.find(item=>item.pin===button.dataset.openGame); saveSession({pin:game.pin,token:game.hostToken,role:'host'}); });
-  app.querySelectorAll('[data-stop-game]').forEach(button => button.onclick = () => run(button,async()=>{ if(!confirm('Stop this quiz now? Players will see the finished game.'))return; await api(`/rooms/${button.dataset.stopGame}/end`,{method:'POST'}); await library(routeVersion); }));
-  app.querySelectorAll('[data-remove-scoreboard]').forEach(button => button.onclick = () => run(button,async()=>{ if(!confirm('Remove this scoreboard and clear the players’ points? This cannot be undone.'))return; await api(`/rooms/${button.dataset.removeScoreboard}/clear-scoreboard`,{method:'POST'}); await library(routeVersion); }));
+  const liveCount = activeGames.filter(game => game.status !== 'finished').length;
+  app.innerHTML = `<section class="shell"><div class="topline"><div><p class="eyebrow">The host's corner</p><h1>Your next great game.</h1><p>Pick a quiz, share the PIN, and bring the room to life.</p></div><div class="actions" style="margin-top:0"><a class="btn ghost" href="#games">🎮 Games${liveCount ? ` (${liveCount} live)` : ''}</a><a class="btn ghost" href="#history">🏆 Leaderboards</a><a class="btn light" href="#create">＋ Create quiz</a></div></div><div class="quiz-grid">${quizzes.map((q,i) => `<article class="card quiz-card"><div class="quiz-art">${q.coverImage ? `<img class="quiz-cover-thumb" src="${escapeHTML(q.coverImage)}" alt="${escapeHTML(q.coverImageAlt || `${q.title} cover`)}">` : `<span aria-hidden="true">${['✦','◎','✷'][i%3]}</span>`}</div><div class="quiz-body"><div><span class="badge">${q.id==='feature-test'?'FEATURE TEST':q.id==='sample'?'READY TO PLAY':'YOUR CREATION'}</span></div><h2 style="margin-top:14px">${escapeHTML(q.title)}</h2>${q.id==='feature-test'?'<p class="small">Try previews, pictures, question types, polls, and scoring with your group.</p>':''}${q.creator?`<p class="small quiz-creator">Created by ${escapeHTML(q.creator)}</p>`:''}<span class="small">${q.questions.length} questions · ${Math.ceil(q.questions.reduce((n,q)=>n+q.timeLimit,0)/60)} min of play</span><div class="actions"><button class="btn primary" data-host="${escapeHTML(q.id)}">${q.id==='feature-test'?'Host test →':'Host live →'}</button><button class="btn subtle" data-test-quiz="${escapeHTML(q.id)}">Test as player</button><button class="btn subtle" data-edit="${escapeHTML(q.id)}">${q.id==='sample'||q.id==='feature-test'?'Copy':'Edit'}</button>${q.id==='feature-test'?'':`<button class="btn subtle" data-delete="${escapeHTML(q.id)}" aria-label="Remove ${escapeHTML(q.title)}">×</button>`}</div></div></article>`).join('')}</div><p class="small muted-white" style="margin-top:28px">Your quizzes are saved on this server. Use this browser to manage them.</p></section>`;
+  app.querySelectorAll('[data-test-quiz]').forEach(button => button.onclick = () => run(button, () => startTestRun({quizId:button.dataset.testQuiz})));
   app.querySelectorAll('[data-host]').forEach(button => button.onclick = () => run(button, async () => {
     const result = await api('/rooms', {method:'POST', body:{quizId:button.dataset.host}});
     saveSession({pin:result.pin, token:result.hostToken, role:'host'});
@@ -361,7 +376,7 @@ async function refreshQuizGames(quizId, version) {
 }
 function editor() {
   clearQuizMaps();
-  app.innerHTML = `<section class="shell editor"><div class="topline"><div><p class="eyebrow">Make it your own</p><h1>${draft.id ? 'Edit your quiz' : 'A great game starts here.'}</h1><p>Mix question types, add pictures, and set the pace.</p></div><a class="btn ghost" href="/host#host">Back to library</a></div>${draft.id ? '<section class="games-admin editor-games" id="quiz-games"><div class="games-admin-title"><h2>Games and scoreboards for this quiz</h2><button class="btn ghost" id="refresh-quiz-games">Refresh</button></div><p class="small games-empty">Loading games…</p></section>' : ''}<form id="editor-form"><label class="field" for="quiz-title">Quiz title</label><input class="input editor-title" id="quiz-title" placeholder="Give your quiz a name" maxlength="120" required value="${escapeHTML(draft.title)}"><label class="field" for="quiz-creator">Creator name <span class="small">(optional)</span></label><input class="input" id="quiz-creator" placeholder="Who created this quiz?" maxlength="80" value="${escapeHTML(draft.creator || '')}"><section class="card image-editor quiz-cover-editor"><h2 class="question-heading">Quiz cover picture</h2>${draft.coverImage ? `<img class="editor-cover" src="${escapeHTML(draft.coverImage)}" alt="${escapeHTML(draft.coverImageAlt || 'Quiz cover picture')}"><button class="btn subtle" type="button" data-remove-cover>Remove cover picture</button>` : `<img class="default-image" src="/images/quiz.svg" alt="Colourful quiz-themed cover"><p class="small">Standard quiz artwork is used on the library card until you add a cover.</p>`}<label class="field" for="cover-image">${draft.coverImage ? 'Replace cover picture' : 'Upload cover picture'}</label><input class="input" id="cover-image" type="file" accept="image/png,image/jpeg,image/webp,image/gif" data-cover-image><p class="small">PNG, JPEG, WebP or GIF · up to 50 MB.</p>${pictureUrlControls('cover')}${draft.coverImage ? `<label class="field" for="cover-alt">Picture description</label><input class="input" id="cover-alt" data-cover-alt maxlength="200" placeholder="Describe the cover picture" value="${escapeHTML(draft.coverImageAlt || '')}">` : ''}</section>${draft.questions.map(editorQuestion).join('')}<div class="savebar"><button class="btn ghost" id="add-question" type="button" ${draft.questions.length >= 50 ? 'disabled' : ''}>＋ Add question</button><span class="small" id="save-status" role="status" aria-live="polite">${draftIsComplete(draft) ? 'Changes will save automatically' : 'Your work is saved on this device as you type'}</span><button class="btn light" type="submit">Save quiz ✓</button></div></form></section>`;
+  app.innerHTML = `<section class="shell editor"><div class="topline"><div><p class="eyebrow">Make it your own</p><h1>${draft.id ? 'Edit your quiz' : 'A great game starts here.'}</h1><p>Mix question types, add pictures, and set the pace.</p></div><a class="btn ghost" href="/host#host">Back to library</a></div>${draft.id ? '<section class="games-admin editor-games" id="quiz-games"><div class="games-admin-title"><h2>Games and scoreboards for this quiz</h2><button class="btn ghost" id="refresh-quiz-games">Refresh</button></div><p class="small games-empty">Loading games…</p></section>' : ''}<form id="editor-form"><label class="field" for="quiz-title">Quiz title</label><input class="input editor-title" id="quiz-title" placeholder="Give your quiz a name" maxlength="120" required value="${escapeHTML(draft.title)}"><label class="field" for="quiz-creator">Creator name <span class="small">(optional)</span></label><input class="input" id="quiz-creator" placeholder="Who created this quiz?" maxlength="80" value="${escapeHTML(draft.creator || '')}"><section class="card image-editor quiz-cover-editor"><h2 class="question-heading">Quiz cover picture</h2>${draft.coverImage ? `<img class="editor-cover" src="${escapeHTML(draft.coverImage)}" alt="${escapeHTML(draft.coverImageAlt || 'Quiz cover picture')}"><button class="btn subtle" type="button" data-remove-cover>Remove cover picture</button>` : `<img class="default-image" src="/images/quiz.svg" alt="Colourful quiz-themed cover"><p class="small">Standard quiz artwork is used on the library card until you add a cover.</p>`}<label class="field" for="cover-image">${draft.coverImage ? 'Replace cover picture' : 'Upload cover picture'}</label><input class="input" id="cover-image" type="file" accept="image/png,image/jpeg,image/webp,image/gif" data-cover-image><p class="small">PNG, JPEG, WebP or GIF · up to 50 MB.</p>${pictureUrlControls('cover')}${draft.coverImage ? `<label class="field" for="cover-alt">Picture description</label><input class="input" id="cover-alt" data-cover-alt maxlength="200" placeholder="Describe the cover picture" value="${escapeHTML(draft.coverImageAlt || '')}">` : ''}</section>${draft.questions.map(editorQuestion).join('')}<div class="savebar"><button class="btn ghost" id="add-question" type="button" ${draft.questions.length >= 50 ? 'disabled' : ''}>＋ Add question</button><span class="small" id="save-status" role="status" aria-live="polite">${draftIsComplete(draft) ? 'Changes will save automatically' : 'Your work is saved on this device as you type'}</span><button class="btn ghost" type="button" id="test-quiz">🧪 Test as player</button><button class="btn light" type="submit">Save quiz ✓</button></div></form></section>`;
   app.querySelectorAll('[data-editor-map]').forEach(element => {
     const i = Number(element.dataset.editorMap), container = element.closest('.question-editor');
     const widget = mountQuizMap(element, {key:`editor:${draft.id || 'new'}:${i}`, point:draft.questions[i].target, onSelect:point => { setLocationFields(container, point); scheduleDraftSave(); }});
@@ -371,6 +386,10 @@ function editor() {
   const form = document.querySelector('#editor-form');
   form.addEventListener('input', scheduleDraftSave);
   form.addEventListener('change', scheduleDraftSave);
+  document.querySelector('#test-quiz').onclick = event => run(event.currentTarget, async () => {
+    readDraft(); if (!draftIsComplete(draft)) throw new Error('Finish the required fields before testing the quiz.');
+    cacheDraft(); await startTestRun({quiz:draft});
+  });
   document.querySelector('#add-question').onclick = () => { readDraft(); draft.questions.push(newQuestion()); editor(); scheduleDraftSave(); app.querySelectorAll('.question-editor')[draft.questions.length - 1].scrollIntoView({block:'center',behavior:'smooth'}); };
   app.querySelectorAll('[data-remove]').forEach(button => button.onclick = () => { readDraft(); draft.questions.splice(Number(button.dataset.remove), 1); editor(); scheduleDraftSave(); });
   app.querySelectorAll('[data-type]').forEach(select => select.onchange = () => {
@@ -434,7 +453,7 @@ function applyRoomState(latest, version) {
 }
 async function connectRoom(role, pin, version) {
   const stored = sessionStorage.getItem(`fredagsquizet-${role}-${pin}`);
-  if (!stored) { location.href = role==='host'?'/host#host':`/#join/${pin}`; return; }
+  if (!stored) { location.href = role==='player'?`/#join/${pin}`:'/host#host'; return; }
   session = JSON.parse(stored);
   const token = session.token;
   playerAnswerOnly = role === 'player' && sessionStorage.getItem(`fredagsquizet-answer-view-${pin}`) === 'answers-only';
@@ -558,11 +577,16 @@ function renderRoom() {
   const oldInput = document.querySelector('#typed-answer');
   const inputDraft = oldInput ? {value:oldInput.value, index:Number(oldInput.dataset.questionIndex), focused:document.activeElement === oldInput, start:oldInput.selectionStart, end:oldInput.selectionEnd} : null;
   const version = routeVersion, token = session.token;
-  const s = roomState, host = s.host, q = s.question, isQuestion = s.status==='question', isReveal=s.status==='reveal';
+  const s = roomState, host = s.host, q = s.question, isQuestion = s.status==='question', isReveal=s.status==='reveal', testing = session.role === 'test';
   document.body.classList.toggle('question-preview', s.status === 'preview');
   document.body.classList.toggle('question-reveal', isReveal);
   const url = `${location.origin}/#join/${s.pin}`;
-  const bar = `<div class="room-bar"><span><b>PIN ${escapeHTML(s.pin)}</b> · ${escapeHTML(s.quizTitle)}</span><span class="connection">● Connected</span><button class="danger-link" id="leave-room">${host?'Leave host screen':'Leave game'}</button></div>`;
+  // Scores change only when answers are revealed, so the player's standing is read from the ranked player list.
+  const me = !host && s.self && s.hasScoredQuestions && !s.scoreboardDeleted && !['lobby','countdown'].includes(s.status) ? s.players.find(player => player.id === s.self.id) : null;
+  const standing = me ? `<span class="player-standing" aria-label="Your score and position">⭐ ${me.score.toLocaleString()} pts · #${me.rank} of ${s.players.length}</span>` : '';
+  const bar = `<div class="room-bar"><span><b>PIN ${escapeHTML(s.pin)}</b> · ${escapeHTML(s.quizTitle)}</span>${standing}<span class="connection">● Connected</span><button class="danger-link" id="leave-room">${testing?'Exit test':host?'Leave host screen':'Leave game'}</button></div>`;
+  const testAction = testing && {lobby:['start','Start quiz'], preview:['open','Open answers now'], question:['next','Reveal answers'], reveal:['next', s.questionIndex + 1 === s.questionCount ? 'Show final screen' : 'Next question']}[s.status];
+  const testBar = testing ? `<div class="test-bar"><span>🧪 Test mode · this is what players see. Nothing is saved to the leaderboards.</span>${testAction ? `<button class="btn light" data-test-action="${testAction[0]}">${testAction[1]}</button>` : ''}</div>` : '';
   let content;
   if (s.status==='countdown') {
     content = `<div class="start-countdown"><p class="eyebrow">Get ready to play</p><strong id="start-countdown">10</strong><p>The quiz is about to begin!</p></div>`;
@@ -573,9 +597,9 @@ function renderRoom() {
   } else {
     const board = s.scoreboardDeleted ? '<p class="muted-white">The scoreboard has been cleared.</p>' : s.scoreboardVisible ? '<div id="scoreboard-reveal"></div>' : '<p class="muted-white">The final scoreboard is ready when you are.</p>';
     const scoreboardControls = host && s.hasScoredQuestions && !s.scoreboardDeleted ? `<div class="lobby-actions"><button class="btn light" data-action="show-scoreboard">${s.scoreboardVisible ? 'Hide scoreboard' : 'Show scoreboard'}</button><button class="btn ghost" data-action="clear-scoreboard">Delete scoreboard</button></div>` : '';
-    content = `<div class="podium-icon" aria-hidden="true">🏆</div><p class="eyebrow">That's a wrap</p><h1>Thanks for playing!</h1><p class="subtitle">${escapeHTML(s.quizTitle)}${s.self?` · Your score: ${s.self.score.toLocaleString()} points`:''}</p>${s.hasScoredQuestions ? `${board}${scoreboardControls}` : '<p class="muted-white">All votes are in. Thanks for sharing your thoughts.</p>'}<a class="btn light" href="${host?'#host':'#'}">${host?'Host another quiz':'Play again'} →</a>`;
+    content = `<div class="podium-icon" aria-hidden="true">🏆</div><p class="eyebrow">That's a wrap</p><h1>Thanks for playing!</h1><p class="subtitle">${escapeHTML(s.quizTitle)}${s.self?` · Your score: ${s.self.score.toLocaleString()} points`:''}</p>${s.hasScoredQuestions ? `${board}${scoreboardControls}` : '<p class="muted-white">All votes are in. Thanks for sharing your thoughts.</p>'}<a class="btn light" href="${testing?escapeHTML(session.returnTo):host?'#games':'#'}">${testing?'Back to the quiz':host?'See all games':'Play again'} →</a>`;
   }
-  app.innerHTML = `<section class="room">${bar}${content}</section>`;
+  app.innerHTML = `<section class="room">${bar}${testBar}${content}</section>`;
   updateScoreboardReveal();
   drawPixelPictures();
   const typedInput = document.querySelector('#typed-answer');
@@ -608,7 +632,11 @@ function renderRoom() {
     event.preventDefault(); const answerText = typedInput.value;
     run(event.submitter, () => submitAnswer({answerText}));
   });
-  document.querySelector('#leave-room').onclick=()=>{ if(confirm(host?'Leave this screen? The game stays available; return with your browser Back button.':'Leave this game? You can return with your browser Back button.')) location.href=host?'/host#host':'/'; };
+  app.querySelectorAll('[data-test-action]').forEach(button=>button.onclick=()=>run(button,async()=>{
+    await api(`/rooms/${s.pin}/${button.dataset.testAction}`,{method:'POST',token:session.hostToken});
+    const result=await api(`/rooms/${s.pin}/state`,{token}); if(version===routeVersion&&!applyRoomState(result, version))renderRoom();
+  }));
+  document.querySelector('#leave-room').onclick=()=>{ if(testing){location.hash=session.returnTo;return;} if(confirm(host?'Leave this screen? The game stays available; return with your browser Back button.':'Leave this game? You can return with your browser Back button.')) location.href=host?'/host#games':'/'; };
   document.querySelector('#copy-link')?.addEventListener('click', () => run(document.querySelector('#copy-link'),async()=>{
     if(navigator.clipboard?.writeText){ await navigator.clipboard.writeText(url); document.querySelector('#copy-link').textContent='Link copied ✓'; }
     else prompt('Copy this invite link:',url);
@@ -658,11 +686,13 @@ async function route() {
   document.body.classList.remove('question-preview');
   document.body.classList.remove('question-reveal');
   setGithubActive(page !== 'room');
-  document.querySelector('header .nav-link').hidden = location.pathname === '/host';
-  if ((['host','history','create','edit'].includes(page) || (page === 'room' && arg === 'host')) && location.pathname !== '/host') { location.replace(`/host${location.hash}`); return; }
+  const hostPage = ['host','history','games','create','edit'].includes(page) || (page === 'room' && ['host','test'].includes(arg));
+  document.querySelector('header .nav-link').hidden = hostPage;
+  if (hostPage && location.pathname !== '/host') { location.replace(`/host${location.hash}`); return; }
   try {
     if(page==='host')await library(version);
     else if(page==='history')await leaderboardHistory(version);
+    else if(page==='games')await gamesPage(version);
     else if(page==='create'){draft=restoreDraft({title:'',creator:'',questions:[newQuestion()]});editor();}
     else if(page==='edit'){
       draft=await api(`/quizzes/${encodeURIComponent(arg)}`);if(version!==routeVersion)return;

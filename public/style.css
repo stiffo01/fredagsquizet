@@ -100,3 +100,5 @@ body.playing-game .lobby-actions:not(.map-host-actions){margin-top:10px}
 .question-picture canvas{display:block;width:100%;height:auto;max-height:36vh;object-fit:contain;border-radius:7px}
 body.playing-game .question-picture canvas{max-height:25svh}
 @media(max-width:700px){body.playing-game:not(.question-preview) .question-picture.pixel-picture{display:block}}
+
+.player-standing{font-weight:800;color:#fff;white-space:nowrap}.test-bar{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px 16px;margin:0 0 18px;padding:10px 14px;border:1px dashed #ffffff70;border-radius:12px;background:#ffffff14;font-size:13px;font-weight:700}.test-bar .btn{padding:8px 14px}

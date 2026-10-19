@@ -102,7 +102,7 @@ export function createApp({ dataDir = process.env.DATA_DIR || path.join(baseDir,
   catch (error) { if (error.code !== 'ENOENT') throw error; }
   const persistHistory = next => { writeFileSync(`${historyPath}.tmp`, JSON.stringify(next, null, 2), { mode: 0o600 }); renameSync(`${historyPath}.tmp`, historyPath); history = next; };
   const recordHistory = room => {
-    if (room.historyId || !room.players.size || !room.quiz.questions.some(q => q.type !== 'poll')) return;
+    if (room.test || room.historyId || !room.players.size || !room.quiz.questions.some(q => q.type !== 'poll')) return;
     room.historyId = randomUUID();
     const leaderboard = rank(room).map(({ id: ignored, ...player }) => player);
     persistHistory([{ id: room.historyId, pin: room.pin, quizId: room.quiz.id, quizTitle: room.quiz.title, finishedAt: Date.now(), playerCount: room.players.size, questionCount: room.quiz.questions.length, leaderboard }, ...history].slice(0, 500));
@@ -254,7 +254,7 @@ export function createApp({ dataDir = process.env.DATA_DIR || path.join(baseDir,
       if (parts[0] === 'api' && parts[1] === 'rooms') {
         if (req.method === 'GET' && parts.length === 2) {
           authorizeHost(req);
-          const games = [...rooms.values()].sort((a, b) => b.touchedAt - a.touchedAt).map(room => ({
+          const games = [...rooms.values()].filter(room => !room.test).sort((a, b) => b.touchedAt - a.touchedAt).map(room => ({
             pin: room.pin, quizId: room.quiz.id, quizTitle: room.quiz.title, status: room.status, playerCount: room.players.size,
             scoreboardAvailable: room.status === 'finished' && room.quiz.questions.some(q => q.type !== 'poll') && !room.scoreboardDeleted,
             scoreboardVisible: room.scoreboardVisible === true, scoreboardDeleted: room.scoreboardDeleted === true,
@@ -273,7 +273,7 @@ export function createApp({ dataDir = process.env.DATA_DIR || path.join(baseDir,
           else quiz = saved.find(q => q.id === input.quizId && !q.hiddenSample);
           if (!quiz) fail(404, 'Quiz not found.');
           let pin; do { pin = String(randomInt(100000, 1000000)); } while (rooms.has(pin));
-          const room = { revision: 0, pin, quiz: structuredClone(quiz), hostToken: secret(), players: new Map(), clients: new Set(), status: 'lobby', index: -1, touchedAt: Date.now() };
+          const room = { revision: 0, pin, quiz: structuredClone(quiz), hostToken: secret(), players: new Map(), clients: new Set(), status: 'lobby', index: -1, touchedAt: Date.now(), test: input.test === true };
           rooms.set(pin, room); return send(res, 201, { pin, hostToken: room.hostToken });
         }
         const room = rooms.get(parts[2]); if (!room) fail(404, 'Game not found. Check your PIN.');

@@ -184,6 +184,22 @@ test('finished games are kept in the leaderboard history across restarts until r
   assert.deepEqual((await f.request('/api/history')).data,[]);
 });
 
+test('test runs are hidden from the game list and never saved to the leaderboard history', async t => {
+  const f = await fixture(t);
+  const room = (await f.request('/api/rooms',{method:'POST',body:{quiz,test:true}})).data;
+  const route = `/api/rooms/${room.pin}`;
+  const player = (await f.request(`${route}/join`,{method:'POST',body:{nickname:'Test player'}})).data.playerToken;
+  assert.deepEqual((await f.request('/api/rooms')).data,[]);
+  const host = action => f.request(`${route}/${action}`,{method:'POST',token:room.hostToken});
+  await host('start'); await host('open');
+  await f.request(`${route}/answer`,{method:'POST',token:player,body:{questionIndex:0,answerIndex:0}});
+  const state = (await f.request(`${route}/state`,{token:player})).data;
+  assert.equal(state.status,'reveal');assert.equal(state.players[0].id,state.self.id);assert.ok(state.players[0].score>=500);assert.equal(state.players[0].rank,1);
+  await host('next'); await host('open'); await host('next'); await host('next');
+  assert.equal((await f.request(`${route}/state`,{token:player})).data.status,'finished');
+  assert.deepEqual((await f.request('/api/history')).data,[]);
+});
+
 test('saved quizzes survive restart and remain scoped to the browser owner', async t => {
   const f = await fixture(t); const token = 'owner-one-long-enough'; const other = 'owner-two-long-enough';
   assert.equal((await f.request('/api/quizzes')).data[0].id, 'sample');
