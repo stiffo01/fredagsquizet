@@ -246,7 +246,7 @@ test('SSE sends authorized state and reconnects using the same player token', as
 test('mixed question types validate, preserve preview secrecy, and score typed answers and polls', async t => {
   const f = await fixture(t);
   const mixed = {title:'Mixed quiz',questions:[
-    {type:'true-false',question:'The sky is blue.',correctIndex:0,revealImage:'/media/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.png',revealImageAlt:'Earth from space',showRevealImage:true,timeLimit:1},
+    {type:'true-false',question:'The sky is blue.',correctIndex:0,revealImage:'/media/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.png',revealImageAlt:'Earth from space',revealImageTitle:'  Seen from orbit  ',showRevealImage:true,timeLimit:1},
     {type:'type-answer',question:'Name the city.',acceptedAnswers:['New York','NYC'],timeLimit:30},
     {type:'poll',question:'Pick a color.',answers:['Red','Blue'],timeLimit:30}
   ]};
@@ -274,6 +274,7 @@ test('mixed question types validate, preserve preview secrecy, and score typed a
   state = (await f.request(`${route}/state`,{token:alice})).data;
   assert.equal(state.status,'reveal');assert.equal(state.question.revealImage,'/media/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.png');
   assert.equal(state.question.revealImageAlt,'Earth from space');
+  assert.equal(state.question.revealImageTitle,'Seen from orbit');
   state = (await host('next')).data;
   assert.equal(state.status,'preview'); assert.equal(state.question.acceptedAnswers,undefined);
   await host('open');

@@ -127,6 +127,7 @@ export function createApp({ dataDir = process.env.DATA_DIR || path.join(baseDir,
       if ((room.status === 'reveal' || room.status === 'finished') && question.showRevealImage) {
         result.question.revealImage = question.revealImage || '';
         result.question.revealImageAlt = question.revealImageAlt || '';
+        result.question.revealImageTitle = question.revealImageTitle || '';
       }
       if (question.type === 'map-pin') result.question.maxDistanceKm = question.maxDistanceKm;
       if (question.type === 'map-pin' && question.zoomNearTarget && !['reveal', 'finished'].includes(room.status)) result.question.startView = startView(room, question);
