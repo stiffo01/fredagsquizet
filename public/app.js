@@ -23,7 +23,7 @@ for (const storage of [localStorage, sessionStorage]) {
 let ownerToken = localStorage.getItem('fredagsquizet-owner');
 if (!ownerToken) { ownerToken = randomToken(); localStorage.setItem('fredagsquizet-owner', ownerToken); }
 let stream, roomState, session, timer, roomSyncCleanup, statePoll, autosaveTimer, autosaveTask, autosavePending = false, quizzes = [], draft, routeVersion = 0, playerAnswerOnly = false;
-const questionTypes = {'quiz':'Multiple choice', 'true-false':'True or false', 'type-answer':'Type an answer', 'pixel-reveal':'Pixelated picture', 'poll':'Poll', 'map-pin':'Pin on a map'};
+const questionTypes = {'quiz':'Multiple choice', 'true-false':'True or false', 'type-answer':'Type an answer', 'pixel-reveal':'Pixelated picture', 'poll':'Poll', 'map-pin':'Pin on a map', 'picture-choice':'Choose between 2 pictures'};
 const playerEmojis = ['😀', '😎', '🤓', '🥳', '🐸', '🦊', '🐼', '🐙', '🦄', '🐧', '🐢', '🦖', '🍕', '🚀', '⭐', '👾'];
 // Blocks along the picture's long side: one at a time from 4 to the speed's half-time count over the
 // first half, so the picture changes from the start, then quickly up to full size near the end.
@@ -240,6 +240,7 @@ function draftIsComplete(value) {
   return !!value.title?.trim() && value.title.length <= 120 && value.questions.length > 0 && value.questions.length <= 50 && value.questions.every(q => {
     if (!q.question?.trim() || q.question.length > 500 || q.timeLimit < 1 || q.timeLimit > 120) return false;
     if (q.type === 'map-pin') return !!q.target && Number.isFinite(q.maxDistanceKm) && q.maxDistanceKm >= 1 && q.maxDistanceKm <= 20000;
+    if (q.type === 'picture-choice') return q.answerImages?.length === 2 && q.answerImages.every(Boolean) && q.answers?.every(answer => answer.length <= 200) && q.correctIndex < 2;
     if (q.type === 'type-answer' || q.type === 'pixel-reveal') return (q.type !== 'pixel-reveal' || !!q.image) && q.acceptedAnswers?.length > 0 && q.acceptedAnswers.length <= 10 && q.acceptedAnswers.every(answer => answer.length <= 200);
     return q.answers?.length >= 2 && q.answers.length <= 4 && q.answers.every(answer => answer.trim() && answer.length <= 200) && (q.type === 'poll' || q.correctIndex < q.answers.length);
   });
@@ -347,6 +348,9 @@ function editorQuestion(q, i) {
   let answers;
   if (type === 'map-pin') {
     answers = `<p>Choose the correct location. Click or tap to place the pin, or use arrow keys to pan and Enter to pin the map centre.</p><div class="quiz-map" data-editor-map="${i}" aria-label="Correct location map"></div><p class="small" data-map-status role="status"></p>${locationFields(q.target)}<label class="field">Distance for zero points (km)<input class="input" data-map-distance type="number" min="1" max="20000" step="any" required value="${escapeHTML(q.maxDistanceKm || 2000)}"></label><p class="small">Up to 1,000 points for accuracy. Points decrease evenly to zero at this distance. No speed bonus.</p><label class="reveal-picture-toggle"><input type="checkbox" data-zoom-near-target ${q.zoomNearTarget ? 'checked' : ''}> Start players zoomed in near the answer</label><p class="small">The map opens a little closer, centred a few hundred km from the correct location so it doesn't give it away.</p>`;
+  } else if (type === 'picture-choice') {
+    const images = q.answerImages || ['',''];
+    answers = `<div class="picture-choice-inputs">${[0,1].map(j => `<div class="picture-choice-edit"><label class="picture-choice-correct"><input type="radio" name="correct-${i}" value="${j}" ${q.correctIndex === j ? 'checked' : ''}> <span aria-hidden="true">${symbols[j]}</span> Correct picture</label>${images[j] ? `<img class="editor-image" src="${escapeHTML(images[j])}" alt="${escapeHTML(q.answers?.[j] || `Picture ${j + 1}`)}"><button class="btn subtle" type="button" data-remove-choice-image="${i}-${j}">Remove picture</button>` : '<p class="small">No picture yet.</p>'}<label class="field" for="choice-image-${i}-${j}">${images[j] ? 'Replace' : 'Upload'} picture ${j + 1}</label><input class="input" id="choice-image-${i}-${j}" type="file" accept="image/png,image/jpeg,image/webp,image/gif" data-image="choice-${i}-${j}">${pictureUrlControls(`choice-${i}-${j}`)}<label class="field" for="choice-caption-${i}-${j}">Caption <span class="small">(optional)</span></label><input class="input" id="choice-caption-${i}-${j}" data-answer maxlength="200" placeholder="Picture ${j + 1}" value="${escapeHTML(q.answers?.[j] || '')}"></div>`).join('')}</div><p class="small">Players tap the picture they think is right. Faster correct answers earn more points.</p>`;
   } else if (type === 'type-answer' || type === 'pixel-reveal') {
     answers = `${type === 'pixel-reveal' ? `<p class="small">Players see the picture pixelated. It sharpens as the answer time runs out and is shown in full at the time you choose. Faster correct guesses earn more points.</p><div class="form-row"><label class="field" for="pixel-reveal-at-${i}" style="margin:0">Show original picture</label><select class="input" id="pixel-reveal-at-${i}" data-pixel-reveal-at>${[...new Set([0,1,2,3,5,10,15,20,30,q.pixelRevealAt ?? 2])].sort((a,b) => a-b).map(t => `<option value="${t}" ${(q.pixelRevealAt ?? 2) === t ? 'selected' : ''}>${t ? `${t} sec before time runs out` : 'When time runs out'}</option>`).join('')}</select></div><div class="form-row"><label class="field" for="pixel-speed-${i}" style="margin:0">Pixel effect speed</label><select class="input" id="pixel-speed-${i}" data-pixel-speed>${Object.entries(pixelSpeedLabels).map(([value, label]) => `<option value="${value}" ${(q.pixelSpeed || 'normal') === value ? 'selected' : ''}>${label}</option>`).join('')}</select><span class="small">How soon the picture gets clear. It changes steadily in the first half and sharpens quickly near the end.</span></div>` : ''}<label class="field" for="accepted-${i}">Accepted answers (one per line)</label><textarea class="input" id="accepted-${i}" data-accepted rows="3" required placeholder="Stockholm\nStockholm city">${escapeHTML((q.acceptedAnswers || ['']).join('\n'))}</textarea><p class="small">Up to 10 accepted spellings. Capitalization and extra spaces are ignored.</p>`;
   } else {
@@ -380,9 +384,14 @@ function editor() {
   app.querySelectorAll('[data-type]').forEach(select => select.onchange = () => {
     readDraft(); const q = draft.questions[Number(select.dataset.type)];
     if (q.type === 'true-false') { q.answers = ['True','False']; q.correctIndex = Math.min(q.correctIndex, 1); }
+    else if (q.type === 'picture-choice') { q.answers = ['','']; q.answerImages ||= ['','']; q.correctIndex = Math.min(q.correctIndex, 1); }
     else if (q.type !== 'type-answer' && q.type !== 'pixel-reveal' && q.answers.length < 2) q.answers = ['','','',''];
     if ((q.type === 'type-answer' || q.type === 'pixel-reveal') && !q.acceptedAnswers?.length) q.acceptedAnswers = [''];
     editor(); scheduleDraftSave();
+  });
+  app.querySelectorAll('[data-remove-choice-image]').forEach(button => button.onclick = () => {
+    readDraft(); const [i, j] = button.dataset.removeChoiceImage.split('-').map(Number), q = draft.questions[i];
+    q.answerImages = [...(q.answerImages || ['',''])]; q.answerImages[j] = ''; editor(); scheduleDraftSave();
   });
   app.querySelectorAll('[data-remove-image]').forEach(button => button.onclick = () => { readDraft(); draft.questions[Number(button.dataset.removeImage)].image = ''; editor(); scheduleDraftSave(); });
   app.querySelectorAll('[data-reveal-image]').forEach(input => input.onchange = () => { readDraft(); editor(); scheduleDraftSave(); });
@@ -403,12 +412,16 @@ function editor() {
       if (version === routeVersion) {
         if (target === 'cover') draft.coverImage = result.image;
         else if (typeof target === 'string' && target.startsWith('reveal-')) draft.questions[Number(target.slice('reveal-'.length))].revealImage = result.image;
+        else if (typeof target === 'string' && target.startsWith('choice-')) {
+          const [i, j] = target.slice('choice-'.length).split('-').map(Number), q = draft.questions[i];
+          q.answerImages = [...(q.answerImages || ['',''])]; q.answerImages[j] = result.image;
+        }
         else draft.questions[target].image = result.image;
       }
     } catch (error) { toast(error.message || 'This picture could not be read. Try a PNG or JPEG.'); }
     finally { uploading = false; if (version === routeVersion) { editor(); scheduleDraftSave(); } }
   };
-  app.querySelectorAll('[data-image]').forEach(input => input.onchange = () => uploadPicture(input.files[0], input.dataset.image.startsWith('reveal-') ? input.dataset.image : Number(input.dataset.image)));
+  app.querySelectorAll('[data-image]').forEach(input => input.onchange = () => uploadPicture(input.files[0], /^(reveal|choice)-/.test(input.dataset.image) ? input.dataset.image : Number(input.dataset.image)));
   app.querySelector('[data-cover-image]').onchange = event => uploadPicture(event.target.files[0], 'cover');
   app.querySelectorAll('[data-load-picture]').forEach(button => button.onclick = () => run(button, async () => {
     const version = routeVersion, target = button.dataset.loadPicture;
@@ -416,7 +429,7 @@ function editor() {
     const url = app.querySelector(`[data-picture-url="${target}"]`).value.trim();
     if (!url) throw new Error('Paste an image URL first.');
     const result = await api('/images/from-url', {method:'POST', body:{url}});
-    if (version === routeVersion) openCropper(result.image, target === 'cover' ? 'cover' : target.startsWith('reveal-') ? target : Number(target.slice('question-'.length)), uploadPicture);
+    if (version === routeVersion) openCropper(result.image, target === 'cover' ? 'cover' : /^(reveal|choice)-/.test(target) ? target : Number(target.slice('question-'.length)), uploadPicture);
   }));
   document.querySelector('#editor-form').onsubmit = event => { event.preventDefault(); run(event.submitter, async () => {
     clearTimeout(autosaveTimer);
@@ -506,10 +519,10 @@ function updateScoreboardReveal() {
 }
 function questionContent(s) {
   const q = s.question, host = s.host, preview = s.status === 'preview', reveal = s.status === 'reveal';
-  const mapPin = q.type === 'map-pin', pixel = q.type === 'pixel-reveal';
+  const mapPin = q.type === 'map-pin', pixel = q.type === 'pixel-reveal', pictures = q.type === 'picture-choice';
   const answerOnly = !host && playerAnswerOnly && s.status === 'question' && !pixel;
   const typed = q.type === 'type-answer' || pixel, poll = q.type === 'poll';
-  const image = mapPin && !preview ? '' : pixel && !reveal ? `<figure class="question-picture pixel-picture"><canvas data-pixel-src="${escapeHTML(q.image)}" role="img" aria-label="Pixelated picture that sharpens as time runs out"></canvas></figure>` : `<figure class="question-picture"><img src="${escapeHTML(q.image || defaultPicture(q))}" alt="${escapeHTML(q.image ? q.imageAlt || 'Question picture' : 'Colourful quiz illustration')}"></figure>`;
+  const image = (mapPin || pictures && !q.image) && !preview ? '' : pixel && !reveal ? `<figure class="question-picture pixel-picture"><canvas data-pixel-src="${escapeHTML(q.image)}" role="img" aria-label="Pixelated picture that sharpens as time runs out"></canvas></figure>` : `<figure class="question-picture"><img src="${escapeHTML(q.image || defaultPicture(q))}" alt="${escapeHTML(q.image ? q.imageAlt || 'Question picture' : 'Colourful quiz illustration')}"></figure>`;
   const revealImage = reveal && !mapPin && q.revealImage ? `<figure class="question-picture explanation-picture"><figcaption>More context</figcaption><img src="${escapeHTML(q.revealImage)}" alt="${escapeHTML(q.revealImageAlt || 'Answer explanation picture')}"></figure>` : '';
   const heading = `<p class="eyebrow">${escapeHTML(questionTypes[q.type] || questionTypes.quiz)} · Question ${s.questionIndex + 1} of ${s.questionCount}</p><h1>${escapeHTML(q.question)}</h1>${image}`;
   if (preview) return `${heading}<div class="preview-note"><span class="badge">TAKE A LOOK</span>${s.previewEndsAt ? '<div class="preview-countdown"><span>Answers in</span><strong id="preview-countdown">5</strong></div>' : '<p>Read the question and study the picture. Answers will open when the host is ready.</p>'}</div>${host ? `<button class="btn light${mapPin ? ' map-host-action' : ''}" data-action="open">Open answers →</button>` : ''}`;
@@ -521,7 +534,7 @@ function questionContent(s) {
   } else if (typed) {
     controls = reveal ? `<div class="feedback">Accepted answers: ${q.acceptedAnswers.map(escapeHTML).join(' · ')}</div>` : host ? '<p class="waiting-answer">Players are typing their answers…</p>' : s.self.answered ? '<p class="waiting-answer">Answer locked in. Fingers crossed!</p>' : `<form id="typed-answer-form" class="card typed-answer"><label class="field" for="typed-answer">Your answer</label><input class="input" id="typed-answer" data-question-index="${s.questionIndex}" maxlength="200" required autocomplete="off" placeholder="Type your answer…"><button class="btn primary wide" type="submit">Lock in answer →</button></form>`;
   } else {
-    controls = `<div class="answers ${q.type === 'true-false' ? 'true-false' : ''}">${q.answers.map((answer, i) => `<button class="answer ${reveal && !poll ? (i === q.correctIndex ? 'correct' : 'dim') : ''} ${s.self?.answerIndex === i ? 'selected' : ''}" data-answer-index="${i}" ${host || reveal || s.self?.answered ? 'disabled' : ''}><span class="symbol" aria-hidden="true">${q.type === 'true-false' ? ['✓','✕'][i] : symbols[i]}</span><span>${escapeHTML(answer)}${reveal && !poll && i === q.correctIndex ? ' ✓' : ''}${reveal ? ` <small>(${s.answerCounts?.[i] ?? 0}${poll ? ' votes' : ''})</small>` : ''}</span></button>`).join('')}</div>${!host && !reveal && s.self.answered ? `<p class="waiting-answer">${poll ? 'Vote recorded. Waiting for everyone…' : 'Answer locked in. Fingers crossed!'}</p>` : ''}`;
+    controls = `<div class="answers ${q.type === 'true-false' ? 'true-false' : ''} ${pictures ? 'picture-answers' : ''}">${q.answers.map((answer, i) => `<button class="answer ${reveal && !poll ? (i === q.correctIndex ? 'correct' : 'dim') : ''} ${s.self?.answerIndex === i ? 'selected' : ''}" data-answer-index="${i}" ${host || reveal || s.self?.answered ? 'disabled' : ''}>${pictures ? `<img src="${escapeHTML(q.answerImages[i])}" alt="${escapeHTML(answer || `Picture ${i + 1}`)}">` : ''}<span class="symbol" aria-hidden="true">${q.type === 'true-false' ? ['✓','✕'][i] : symbols[i]}</span><span>${escapeHTML(pictures ? answer || `Picture ${i + 1}` : answer)}${reveal && !poll && i === q.correctIndex ? ' ✓' : ''}${reveal ? ` <small>(${s.answerCounts?.[i] ?? 0}${poll ? ' votes' : ''})</small>` : ''}</span></button>`).join('')}</div>${!host && !reveal && s.self.answered ? `<p class="waiting-answer">${poll ? 'Vote recorded. Waiting for everyone…' : 'Answer locked in. Fingers crossed!'}</p>` : ''}`;
   }
   const feedback = !host && reveal ? `<div class="feedback">${mapPin ? (s.self.answered ? `${s.self.distanceKm.toLocaleString(undefined,{maximumFractionDigits:2})} km away · +${s.self.points} points` : 'No pin submitted. 0 points.') : poll ? (s.self.answered ? 'Thanks for voting! No points in this round.' : 'Voting closed. No points in this round.') : s.self.correct ? `Correct! +${s.self.points} points` : s.self.answered ? 'Not this time. You’ve got the next one!' : 'Time’s up!'}</div>` : '';
   const showHeading = !answerOnly;

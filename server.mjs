@@ -133,6 +133,7 @@ export function createApp({ dataDir = process.env.DATA_DIR || path.join(baseDir,
       if (question.type === 'pixel-reveal') { result.question.pixelRevealAt = question.pixelRevealAt ?? 2; result.question.pixelSpeed = question.pixelSpeed ?? 'normal'; }
       if (room.status !== 'preview') {
         result.question.answers = question.answers;
+        if (question.type === 'picture-choice') result.question.answerImages = question.answerImages;
         result.question.startedAt = room.startedAt;
         result.question.deadline = room.deadline;
       }

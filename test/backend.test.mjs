@@ -356,6 +356,35 @@ test('uploaded images are bounded, saved with quizzes, served safely, and surviv
   assert.equal(preview.status,'preview');assert.equal(preview.question.image,image);assert.equal(preview.question.imageAlt,'A test pixel');assert.equal(preview.question.answers,undefined);
 });
 
+test('picture choice questions need two pictures and score the chosen picture', async t => {
+  const f = await fixture(t);
+  const images = ['/media/' + 'a'.repeat(64) + '.png', '/media/' + 'b'.repeat(64) + '.jpg'];
+  const question = {type:'picture-choice', question:'Which is the Eiffel Tower?', answerImages:images, answers:['Paris',''], correctIndex:1, timeLimit:20};
+  for (const invalid of [{...question,answerImages:[images[0]]}, {...question,answerImages:[images[0],'https://example.com/x.png']}, {...question,correctIndex:2}, {...question,answers:['x'.repeat(201),'']}]) {
+    assert.equal((await f.request('/api/quizzes',{method:'POST',token:'picture-owner-token',body:{title:'Invalid pictures',questions:[invalid]}})).status,400);
+  }
+  const saved = (await f.request('/api/quizzes',{method:'POST',token:'picture-owner-token',body:{title:'Pictures',questions:[question]}})).data;
+  assert.deepEqual(saved.questions[0].answerImages,images); assert.deepEqual(saved.questions[0].answers,['Paris','']);
+  const room = (await f.request('/api/rooms',{method:'POST',token:'picture-owner-token',body:{quiz:{title:'Pictures',questions:[question]}}})).data;
+  const route = `/api/rooms/${room.pin}`;
+  const players = [];
+  for (const nickname of ['Right','Wrong']) players.push((await f.request(`${route}/join`,{method:'POST',body:{nickname}})).data.playerToken);
+  const action = name => f.request(`${route}/${name}`,{method:'POST',token:room.hostToken});
+  const state = token => f.request(`${route}/state`,{token}).then(r=>r.data);
+  await action('start');
+  assert.equal((await state(players[0])).question.answerImages,undefined);
+  await action('open');
+  const open = await state(players[0]);
+  assert.deepEqual(open.question.answerImages,images); assert.equal(open.question.correctIndex,undefined);
+  assert.equal((await f.request(`${route}/answer`,{method:'POST',token:players[0],body:{questionIndex:0,answerIndex:2}})).status,400);
+  assert.equal((await f.request(`${route}/answer`,{method:'POST',token:players[0],body:{questionIndex:0,answerIndex:1}})).status,200);
+  assert.equal((await f.request(`${route}/answer`,{method:'POST',token:players[1],body:{questionIndex:0,answerIndex:0}})).status,200);
+  const right = await state(players[0]), wrong = await state(players[1]);
+  assert.equal(right.status,'reveal'); assert.equal(right.question.correctIndex,1); assert.deepEqual(right.answerCounts,[1,1]);
+  assert.equal(right.self.correct,true); assert.ok(right.self.points > 500);
+  assert.equal(wrong.self.correct,false); assert.equal(wrong.self.points,0);
+});
+
 test('map pins can start zoomed near the target without revealing it', async t => {
   const f = await fixture(t);
   const question = {type:'map-pin', question:'Find the target', target:{lat:59.3293,lng:18.0686}, maxDistanceKm:1000, timeLimit:30};
