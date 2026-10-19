@@ -153,7 +153,7 @@ export function createApp({ dataDir = process.env.DATA_DIR || path.join(baseDir,
   };
   const beginCountdown = room => {
     room.index = 0;
-    if (startCountdownMs === 0) { showPreview(room, true); return; }
+    if (startCountdownMs === 0 || room.test) { showPreview(room, true); return; }
     room.countdownEndsAt = Date.now() + startCountdownMs;
     room.status = 'countdown';
     broadcast(room);

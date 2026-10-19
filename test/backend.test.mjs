@@ -185,13 +185,15 @@ test('finished games are kept in the leaderboard history across restarts until r
 });
 
 test('test runs are hidden from the game list and never saved to the leaderboard history', async t => {
-  const f = await fixture(t);
+  const f = await fixture(t, {startCountdownMs:10_000});
   const room = (await f.request('/api/rooms',{method:'POST',body:{quiz,test:true}})).data;
   const route = `/api/rooms/${room.pin}`;
   const player = (await f.request(`${route}/join`,{method:'POST',body:{nickname:'Test player'}})).data.playerToken;
   assert.deepEqual((await f.request('/api/rooms')).data,[]);
   const host = action => f.request(`${route}/${action}`,{method:'POST',token:room.hostToken});
-  await host('start'); await host('open');
+  await host('start');
+  assert.equal((await f.request(`${route}/state`,{token:player})).data.status,'preview','test runs skip the start countdown');
+  await host('open');
   await f.request(`${route}/answer`,{method:'POST',token:player,body:{questionIndex:0,answerIndex:0}});
   const state = (await f.request(`${route}/state`,{token:player})).data;
   assert.equal(state.status,'reveal');assert.equal(state.players[0].id,state.self.id);assert.ok(state.players[0].score>=500);assert.equal(state.players[0].rank,1);
