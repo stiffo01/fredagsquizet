@@ -319,7 +319,7 @@ function editorQuestion(q, i) {
   if (type === 'map-pin') {
     answers = `<p>Choose the correct location. Click or tap to place the pin, or use arrow keys to pan and Enter to pin the map centre.</p><div class="quiz-map" data-editor-map="${i}" aria-label="Correct location map"></div><p class="small" data-map-status role="status"></p>${locationFields(q.target)}<label class="field">Distance for zero points (km)<input class="input" data-map-distance type="number" min="1" max="20000" step="any" required value="${escapeHTML(q.maxDistanceKm || 2000)}"></label><p class="small">Up to 1,000 points for accuracy. Points decrease evenly to zero at this distance. No speed bonus.</p>`;
   } else if (type === 'type-answer' || type === 'pixel-reveal') {
-    answers = `${type === 'pixel-reveal' ? '<p class="small">Players see the picture pixelated. It sharpens as the answer time runs out and is shown in full with 1 second left. Faster correct guesses earn more points.</p>' : ''}<label class="field" for="accepted-${i}">Accepted answers (one per line)</label><textarea class="input" id="accepted-${i}" data-accepted rows="3" required placeholder="Stockholm\nStockholm city">${escapeHTML((q.acceptedAnswers || ['']).join('\n'))}</textarea><p class="small">Up to 10 accepted spellings. Capitalization and extra spaces are ignored.</p>`;
+    answers = `${type === 'pixel-reveal' ? '<p class="small">Players see the picture pixelated. It sharpens as the answer time runs out and is shown in full with 2 seconds left. Faster correct guesses earn more points.</p>' : ''}<label class="field" for="accepted-${i}">Accepted answers (one per line)</label><textarea class="input" id="accepted-${i}" data-accepted rows="3" required placeholder="Stockholm\nStockholm city">${escapeHTML((q.acceptedAnswers || ['']).join('\n'))}</textarea><p class="small">Up to 10 accepted spellings. Capitalization and extra spaces are ignored.</p>`;
   } else {
     answers = `<div class="answer-inputs">${q.answers.map((answer, j) => `<div class="answer-edit">${type !== 'poll' ? `<input type="radio" name="correct-${i}" value="${j}" ${q.correctIndex === j ? 'checked' : ''} aria-label="Mark answer ${j + 1} correct">` : ''}<span aria-hidden="true">${type === 'true-false' ? ['✓','✕'][j] : symbols[j]}</span><input class="input" data-answer required maxlength="200" placeholder="Answer ${j + 1}" aria-label="Question ${i + 1}, answer ${j + 1}" value="${escapeHTML(answer)}" ${type === 'true-false' ? 'readonly' : ''}></div>`).join('')}</div><p class="small">${type === 'poll' ? 'Everyone gets a vote. No correct answer and no points.' : 'Select the circle beside the correct answer.'}</p>`;
   }
@@ -523,11 +523,12 @@ function drawPixelPictures() {
     let image = pixelImages.get(source);
     if (!image) { image = new Image(); image.onload = drawPixelPictures; image.src = source; pixelImages.set(source, image); }
     if (!image.complete || !image.naturalWidth || !q) return;
-    // Sharpen from coarse blocks when answers open to the original picture with one second left.
-    const progress = roomState.status === 'question' ? Math.min(1, Math.max(0, (Date.now() - q.startedAt) / Math.max(1, q.deadline - q.startedAt - 1000))) : 0;
+    // Sharpen from coarse blocks when answers open: 80% of full resolution at 80% of the reveal time, the original picture with two seconds left.
+    const progress = roomState.status === 'question' ? Math.min(1, Math.max(0, (Date.now() - q.startedAt) / Math.max(1, q.deadline - q.startedAt - 2000))) : 0;
     const scale = Math.min(1, 1200 / Math.max(image.naturalWidth, image.naturalHeight));
     const width = Math.max(1, Math.round(image.naturalWidth * scale)), height = Math.max(1, Math.round(image.naturalHeight * scale));
-    const blocks = progress >= 1 ? width : Math.min(width, Math.round(4 * (width / 4) ** (progress ** 1.5)));
+    const start = Math.min(width, 12), sharp = width * 0.8;
+    const blocks = progress >= 1 ? width : Math.round(progress < 0.8 ? start * (sharp / start) ** (progress / 0.8) : sharp + (width - sharp) * (progress - 0.8) / 0.2);
     const key = `${width}x${height}:${blocks}`;
     if (canvas.dataset.drawn === key) return;
     canvas.dataset.drawn = key; canvas.width = width; canvas.height = height;
