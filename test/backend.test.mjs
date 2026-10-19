@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import http from 'node:http';
 import { createApp } from '../server.mjs';
+import { distanceKm } from '../lib/quiz.mjs';
 
 const quiz = { title: 'Integration quiz', questions: [{ question: 'Two plus two?', answers: ['Four', 'Five'], correctIndex: 0, timeLimit: 10 }, { question: 'Blue or green?', answers: ['Blue', 'Green'], correctIndex: 1, timeLimit: 1 }] };
 async function fixture(t, timing = {}) {
@@ -353,6 +354,27 @@ test('uploaded images are bounded, saved with quizzes, served safely, and surviv
   await f.request(`/api/rooms/${room.pin}/join`,{method:'POST',body:{nickname:'Viewer'}});
   const preview = (await f.request(`/api/rooms/${room.pin}/start`,{method:'POST',token:room.hostToken})).data;
   assert.equal(preview.status,'preview');assert.equal(preview.question.image,image);assert.equal(preview.question.imageAlt,'A test pixel');assert.equal(preview.question.answers,undefined);
+});
+
+test('map pins can start zoomed near the target without revealing it', async t => {
+  const f = await fixture(t);
+  const question = {type:'map-pin', question:'Find the target', target:{lat:59.3293,lng:18.0686}, maxDistanceKm:1000, timeLimit:30};
+  const room = (await f.request('/api/rooms',{method:'POST',token:'map-test-owner-token',body:{quiz:{title:'Zoom quiz',questions:[{...question,zoomNearTarget:true},question]}}})).data;
+  const route = `/api/rooms/${room.pin}`;
+  const player = (await f.request(`${route}/join`,{method:'POST',body:{nickname:'Zoomer'}})).data.playerToken;
+  const action = name => f.request(`${route}/${name}`,{method:'POST',token:room.hostToken});
+  const state = token => f.request(`${route}/state`,{token}).then(r=>r.data);
+  await action('start'); await action('open');
+  const first = await state(player);
+  assert.equal(first.question.target,undefined);
+  assert.equal(first.question.startView.zoom,4);
+  const offKm = distanceKm(first.question.startView.center, question.target);
+  assert.ok(offKm > 150 && offKm < 700, `start view should be near but not on the target (${offKm} km)`);
+  assert.deepEqual((await state(player)).question.startView, first.question.startView);
+  await action('next');
+  assert.equal((await state(player)).question.startView,undefined);
+  await action('next'); await action('open');
+  assert.equal((await state(player)).question.startView,undefined);
 });
 
 test('map pins validate, hide the target, and award distance-based points once', async t => {

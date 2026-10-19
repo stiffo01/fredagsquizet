@@ -219,6 +219,7 @@ function readDraft() {
     acceptedAnswers: (el.querySelector('[data-accepted]')?.value || '').split('\n').map(answer => answer.trim()).filter(Boolean),
     target: readLocation(el),
     maxDistanceKm: Number(el.querySelector('[data-map-distance]')?.value || 2000),
+    zoomNearTarget: el.querySelector('[data-zoom-near-target]')?.checked || false,
     pixelRevealAt: Number(el.querySelector('[data-pixel-reveal-at]')?.value ?? 2),
     pixelSpeed: el.querySelector('[data-pixel-speed]')?.value || 'normal',
     correctIndex: Number(el.querySelector('input[type=radio]:checked')?.value || 0),
@@ -345,7 +346,7 @@ function editorQuestion(q, i) {
   const type = q.type || 'quiz';
   let answers;
   if (type === 'map-pin') {
-    answers = `<p>Choose the correct location. Click or tap to place the pin, or use arrow keys to pan and Enter to pin the map centre.</p><div class="quiz-map" data-editor-map="${i}" aria-label="Correct location map"></div><p class="small" data-map-status role="status"></p>${locationFields(q.target)}<label class="field">Distance for zero points (km)<input class="input" data-map-distance type="number" min="1" max="20000" step="any" required value="${escapeHTML(q.maxDistanceKm || 2000)}"></label><p class="small">Up to 1,000 points for accuracy. Points decrease evenly to zero at this distance. No speed bonus.</p>`;
+    answers = `<p>Choose the correct location. Click or tap to place the pin, or use arrow keys to pan and Enter to pin the map centre.</p><div class="quiz-map" data-editor-map="${i}" aria-label="Correct location map"></div><p class="small" data-map-status role="status"></p>${locationFields(q.target)}<label class="field">Distance for zero points (km)<input class="input" data-map-distance type="number" min="1" max="20000" step="any" required value="${escapeHTML(q.maxDistanceKm || 2000)}"></label><p class="small">Up to 1,000 points for accuracy. Points decrease evenly to zero at this distance. No speed bonus.</p><label class="reveal-picture-toggle"><input type="checkbox" data-zoom-near-target ${q.zoomNearTarget ? 'checked' : ''}> Start players zoomed in near the answer</label><p class="small">The map opens a little closer, centred a few hundred km from the correct location so it doesn't give it away.</p>`;
   } else if (type === 'type-answer' || type === 'pixel-reveal') {
     answers = `${type === 'pixel-reveal' ? `<p class="small">Players see the picture pixelated. It sharpens as the answer time runs out and is shown in full at the time you choose. Faster correct guesses earn more points.</p><div class="form-row"><label class="field" for="pixel-reveal-at-${i}" style="margin:0">Show original picture</label><select class="input" id="pixel-reveal-at-${i}" data-pixel-reveal-at>${[...new Set([0,1,2,3,5,10,15,20,30,q.pixelRevealAt ?? 2])].sort((a,b) => a-b).map(t => `<option value="${t}" ${(q.pixelRevealAt ?? 2) === t ? 'selected' : ''}>${t ? `${t} sec before time runs out` : 'When time runs out'}</option>`).join('')}</select></div><div class="form-row"><label class="field" for="pixel-speed-${i}" style="margin:0">Pixel effect speed</label><select class="input" id="pixel-speed-${i}" data-pixel-speed>${Object.entries(pixelSpeedLabels).map(([value, label]) => `<option value="${value}" ${(q.pixelSpeed || 'normal') === value ? 'selected' : ''}>${label}</option>`).join('')}</select><span class="small">How soon the picture gets clear. It changes steadily in the first half and sharpens quickly near the end.</span></div>` : ''}<label class="field" for="accepted-${i}">Accepted answers (one per line)</label><textarea class="input" id="accepted-${i}" data-accepted rows="3" required placeholder="Stockholm\nStockholm city">${escapeHTML((q.acceptedAnswers || ['']).join('\n'))}</textarea><p class="small">Up to 10 accepted spellings. Capitalization and extra spaces are ignored.</p>`;
   } else {
@@ -598,7 +599,7 @@ function renderRoom() {
     const key = `${s.pin}:${s.questionIndex}`, form = document.querySelector('#map-answer-form');
     const point = s.self?.answerLocation || (form ? pendingPins.get(key) : undefined);
     if (form && point) setLocationFields(form, point);
-    const widget = mountQuizMap(mapElement, {key:`room:${key}:${s.status}`, point, target:isReveal ? q.target : undefined, hideLabels:!host && !isReveal, onSelect:form ? point => { pendingPins.set(key,point); setLocationFields(form,point); form.requestSubmit(); } : undefined});
+    const widget = mountQuizMap(mapElement, {key:`room:${key}:${s.status}`, point, target:isReveal ? q.target : undefined, start:q.startView, hideLabels:!host && !isReveal, onSelect:form ? point => { pendingPins.set(key,point); setLocationFields(form,point); form.requestSubmit(); } : undefined});
     if (form) {
       const coordinateToggle = form.querySelector('.map-coordinate-toggle');
       const coordinates = form.querySelector('.map-coordinates');

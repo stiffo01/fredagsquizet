@@ -13,9 +13,9 @@ function hideMapLabels(renderer) {
     }
   }
 }
-function mountQuizMap(element, {key, point, target, onSelect, hideLabels = false}) {
+function mountQuizMap(element, {key, point, target, start, onSelect, hideLabels = false}) {
   const view = mapViews.get(key);
-  const map = L.map(element, {worldCopyJump:true, minZoom:2, maxZoom:19, maxBounds:[[-85,-Infinity],[85,Infinity]], maxBoundsViscosity:1}).setView(view?.center || (target || point || [20,0]), view?.zoom ?? (target || point ? 5 : 2));
+  const map = L.map(element, {worldCopyJump:true, minZoom:2, maxZoom:19, maxBounds:[[-85,-Infinity],[85,Infinity]], maxBoundsViscosity:1}).setView(view?.center || (target || point || start?.center || [20,0]), view?.zoom ?? (target || point ? 5 : start?.zoom ?? 2));
   quizMaps.push({map, key});
   const status = element.parentElement.querySelector('[data-map-status]');
   const showMapError = () => {

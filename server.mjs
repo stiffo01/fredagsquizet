@@ -107,6 +107,16 @@ export function createApp({ dataDir = process.env.DATA_DIR || path.join(baseDir,
     const leaderboard = rank(room).map(({ id: ignored, ...player }) => player);
     persistHistory([{ id: room.historyId, pin: room.pin, quizId: room.quiz.id, quizTitle: room.quiz.title, finishedAt: Date.now(), playerCount: room.players.size, questionCount: room.quiz.questions.length, leaderboard }, ...history].slice(0, 500));
   };
+  // A closer starting view for map questions, centred a few hundred km off the target so it doesn't give the answer away.
+  const startView = (room, question) => {
+    if (room.startView?.index !== room.index) {
+      const angle = Math.random() * 2 * Math.PI, degrees = 2 + Math.random() * 3;
+      const lat = Math.max(-80, Math.min(80, question.target.lat + degrees * Math.sin(angle)));
+      const lng = ((question.target.lng + degrees * Math.cos(angle) / Math.max(0.3, Math.cos(lat * Math.PI / 180)) + 540) % 360) - 180;
+      room.startView = { index: room.index, center: { lat, lng }, zoom: 4 };
+    }
+    return { center: room.startView.center, zoom: room.startView.zoom };
+  };
   const identity = (room, token) => token && token === room.hostToken ? { host: true } : room.players.get(token);
   const state = (room, who) => {
     const question = room.quiz.questions[room.index];
@@ -119,6 +129,7 @@ export function createApp({ dataDir = process.env.DATA_DIR || path.join(baseDir,
         result.question.revealImageAlt = question.revealImageAlt || '';
       }
       if (question.type === 'map-pin') result.question.maxDistanceKm = question.maxDistanceKm;
+      if (question.type === 'map-pin' && question.zoomNearTarget && !['reveal', 'finished'].includes(room.status)) result.question.startView = startView(room, question);
       if (question.type === 'pixel-reveal') { result.question.pixelRevealAt = question.pixelRevealAt ?? 2; result.question.pixelSpeed = question.pixelSpeed ?? 'normal'; }
       if (room.status !== 'preview') {
         result.question.answers = question.answers;
