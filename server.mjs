@@ -295,7 +295,7 @@ export function createApp({ dataDir = process.env.DATA_DIR || path.join(baseDir,
             who.answer = { lat: answerLocation.lat, lng: answerLocation.lng };
             who.distanceKm = distanceKm(who.answer, q.target);
             who.correct = mapPoints(who.distanceKm, q.maxDistanceKm) === 1000;
-          } else if (q.type === 'type-answer') {
+          } else if (q.type === 'type-answer' || q.type === 'pixel-reveal') {
             if (typeof answerText !== 'string' || !answerText.trim() || answerText.length > 200) fail(400, 'Type an answer of 1–200 characters.');
             who.answer = answerText.trim(); who.correct = q.acceptedAnswers.some(a => normalizeAnswer(a) === normalizeAnswer(answerText));
           } else {

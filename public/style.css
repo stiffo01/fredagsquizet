@@ -97,3 +97,6 @@ body.playing-game .lobby-actions:not(.map-host-actions){margin-top:10px}
 
 .scan-status{min-height:0;margin:8px 0 0;text-align:center}.scan-status:empty{display:none}.join .card .scan-status{color:#766f85}
 .qr-scanner{position:fixed;inset:0;z-index:20;display:grid;place-items:center;padding:18px;background:#160c25ef}.qr-scanner-panel{width:min(100%,520px);padding:22px;border-radius:16px;background:#fff;color:#252033;text-align:center;box-shadow:0 14px 50px #0008}.qr-scanner-panel video{display:block;width:100%;max-height:65svh;margin:14px auto;border-radius:10px;background:#17121d;object-fit:cover}.qr-scanner-panel .small{min-height:20px}
+.question-picture canvas{display:block;width:100%;height:auto;max-height:36vh;object-fit:contain;border-radius:7px}
+body.playing-game .question-picture canvas{max-height:25svh}
+@media(max-width:700px){body.playing-game:not(.question-preview) .question-picture.pixel-picture{display:block}}

@@ -266,6 +266,30 @@ test('mixed question types validate, preserve preview secrecy, and score typed a
   }
 });
 
+test('pixelated picture questions require a picture and score typed guesses', async t => {
+  const f = await fixture(t);
+  const image = '/media/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb.jpg';
+  const pixel = {type:'pixel-reveal',question:'What is in the picture?',image,acceptedAnswers:['Eiffel Tower','Eiffeltornet'],timeLimit:30};
+  assert.equal((await f.request('/api/rooms',{method:'POST',body:{quiz:{title:'No picture',questions:[{...pixel,image:''}]}}})).status,400);
+  assert.equal((await f.request('/api/rooms',{method:'POST',body:{quiz:{title:'No answers',questions:[{...pixel,acceptedAnswers:[]}]}}})).status,400);
+  const room = (await f.request('/api/rooms',{method:'POST',body:{quiz:{title:'Pixel quiz',questions:[pixel]}}})).data;
+  const route = `/api/rooms/${room.pin}`;
+  const alice = (await f.request(`${route}/join`,{method:'POST',body:{nickname:'Alice'}})).data.playerToken;
+  const bob = (await f.request(`${route}/join`,{method:'POST',body:{nickname:'Bob'}})).data.playerToken;
+  const host = action => f.request(`${route}/${action}`,{method:'POST',token:room.hostToken});
+  await host('start');
+  let state = (await f.request(`${route}/state`,{token:alice})).data;
+  assert.equal(state.question.type,'pixel-reveal');assert.equal(state.question.image,image);assert.equal(state.question.acceptedAnswers,undefined);
+  await host('open');
+  assert.equal((await f.request(`${route}/answer`,{method:'POST',token:alice,body:{questionIndex:0,answerText:'  eiffeltornet '}})).status,200);
+  assert.equal((await f.request(`${route}/answer`,{method:'POST',token:bob,body:{questionIndex:0,answerText:'Big Ben'}})).status,200);
+  state = (await f.request(`${route}/state`,{token:alice})).data;
+  assert.equal(state.status,'reveal');assert.equal(state.self.correct,true);assert.ok(state.self.points>=500);
+  assert.deepEqual(state.question.acceptedAnswers,['Eiffel Tower','Eiffeltornet']);
+  state = (await f.request(`${route}/state`,{token:bob})).data;
+  assert.equal(state.self.correct,false);assert.equal(state.self.points,0);
+});
+
 test('uploaded images are bounded, saved with quizzes, served safely, and survive restart', async t => {
   const f = await fixture(t), token='image-owner-long-enough';
   const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGP4z8AAAAMBAQDJ/pLvAAAAAElFTkSuQmCC', 'base64');

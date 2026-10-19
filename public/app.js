@@ -23,7 +23,7 @@ for (const storage of [localStorage, sessionStorage]) {
 let ownerToken = localStorage.getItem('fredagsquizet-owner');
 if (!ownerToken) { ownerToken = randomToken(); localStorage.setItem('fredagsquizet-owner', ownerToken); }
 let stream, roomState, session, timer, roomSyncCleanup, statePoll, autosaveTimer, autosaveTask, autosavePending = false, quizzes = [], draft, routeVersion = 0, playerAnswerOnly = false;
-const questionTypes = {'quiz':'Multiple choice', 'true-false':'True or false', 'type-answer':'Type an answer', 'poll':'Poll', 'map-pin':'Pin on a map'};
+const questionTypes = {'quiz':'Multiple choice', 'true-false':'True or false', 'type-answer':'Type an answer', 'pixel-reveal':'Pixelated picture', 'poll':'Poll', 'map-pin':'Pin on a map'};
 const playerEmojis = ['😀', '😎', '🤓', '🥳', '🐸', '🦊', '🐼', '🐙', '🦄', '🐧', '🐢', '🦖', '🍕', '🚀', '⭐', '👾'];
 const newQuestion = () => ({type:'quiz', question:'', image:'', imageAlt:'', revealImage:'', revealImageAlt:'', showRevealImage:false, answers:['','','',''], correctIndex:0, timeLimit:20});
 function toast(message) { const el = document.querySelector('#toast'); el.textContent = message; el.hidden = false; clearTimeout(toast.timeout); toast.timeout = setTimeout(() => el.hidden = true, 6000); }
@@ -211,7 +211,7 @@ function draftIsComplete(value) {
   return !!value.title?.trim() && value.title.length <= 120 && value.questions.length > 0 && value.questions.length <= 50 && value.questions.every(q => {
     if (!q.question?.trim() || q.question.length > 500 || q.timeLimit < 1 || q.timeLimit > 120) return false;
     if (q.type === 'map-pin') return !!q.target && Number.isFinite(q.maxDistanceKm) && q.maxDistanceKm >= 1 && q.maxDistanceKm <= 20000;
-    if (q.type === 'type-answer') return q.acceptedAnswers?.length > 0 && q.acceptedAnswers.length <= 10 && q.acceptedAnswers.every(answer => answer.length <= 200);
+    if (q.type === 'type-answer' || q.type === 'pixel-reveal') return (q.type !== 'pixel-reveal' || !!q.image) && q.acceptedAnswers?.length > 0 && q.acceptedAnswers.length <= 10 && q.acceptedAnswers.every(answer => answer.length <= 200);
     return q.answers?.length >= 2 && q.answers.length <= 4 && q.answers.every(answer => answer.trim() && answer.length <= 200) && (q.type === 'poll' || q.correctIndex < q.answers.length);
   });
 }
@@ -318,8 +318,8 @@ function editorQuestion(q, i) {
   let answers;
   if (type === 'map-pin') {
     answers = `<p>Choose the correct location. Click or tap to place the pin, or use arrow keys to pan and Enter to pin the map centre.</p><div class="quiz-map" data-editor-map="${i}" aria-label="Correct location map"></div><p class="small" data-map-status role="status"></p>${locationFields(q.target)}<label class="field">Distance for zero points (km)<input class="input" data-map-distance type="number" min="1" max="20000" step="any" required value="${escapeHTML(q.maxDistanceKm || 2000)}"></label><p class="small">Up to 1,000 points for accuracy. Points decrease evenly to zero at this distance. No speed bonus.</p>`;
-  } else if (type === 'type-answer') {
-    answers = `<label class="field" for="accepted-${i}">Accepted answers (one per line)</label><textarea class="input" id="accepted-${i}" data-accepted rows="3" required placeholder="Stockholm\nStockholm city">${escapeHTML((q.acceptedAnswers || ['']).join('\n'))}</textarea><p class="small">Up to 10 accepted spellings. Capitalization and extra spaces are ignored.</p>`;
+  } else if (type === 'type-answer' || type === 'pixel-reveal') {
+    answers = `${type === 'pixel-reveal' ? '<p class="small">Players see the picture pixelated. It sharpens as the answer time runs out and is shown in full with 1 second left. Faster correct guesses earn more points.</p>' : ''}<label class="field" for="accepted-${i}">Accepted answers (one per line)</label><textarea class="input" id="accepted-${i}" data-accepted rows="3" required placeholder="Stockholm\nStockholm city">${escapeHTML((q.acceptedAnswers || ['']).join('\n'))}</textarea><p class="small">Up to 10 accepted spellings. Capitalization and extra spaces are ignored.</p>`;
   } else {
     answers = `<div class="answer-inputs">${q.answers.map((answer, j) => `<div class="answer-edit">${type !== 'poll' ? `<input type="radio" name="correct-${i}" value="${j}" ${q.correctIndex === j ? 'checked' : ''} aria-label="Mark answer ${j + 1} correct">` : ''}<span aria-hidden="true">${type === 'true-false' ? ['✓','✕'][j] : symbols[j]}</span><input class="input" data-answer required maxlength="200" placeholder="Answer ${j + 1}" aria-label="Question ${i + 1}, answer ${j + 1}" value="${escapeHTML(answer)}" ${type === 'true-false' ? 'readonly' : ''}></div>`).join('')}</div><p class="small">${type === 'poll' ? 'Everyone gets a vote. No correct answer and no points.' : 'Select the circle beside the correct answer.'}</p>`;
   }
@@ -327,7 +327,7 @@ function editorQuestion(q, i) {
     <div class="question-heading"><h2>Question ${i + 1}</h2><button class="btn subtle" type="button" data-remove="${i}" ${draft.questions.length === 1 ? 'disabled' : ''} aria-label="Remove question ${i + 1}">Remove</button></div>
     <label class="field" for="type-${i}">Question type</label><select class="input type-select" id="type-${i}" data-type="${i}">${Object.entries(questionTypes).map(([value, label]) => `<option value="${value}" ${value === type ? 'selected' : ''}>${label}</option>`).join('')}</select>
     <label class="field" for="question-${i}">Question heading</label><textarea class="input" id="question-${i}" data-question maxlength="500" required rows="2" placeholder="Type your question…">${escapeHTML(q.question)}</textarea>
-    <div class="image-editor">${q.image ? `<img class="editor-image" src="${escapeHTML(q.image)}" alt="${escapeHTML(q.imageAlt || 'Question image')}"><button class="btn subtle" type="button" data-remove-image="${i}">Remove picture</button>` : `<img class="default-image" src="${defaultPicture(q)}" alt="Colourful quiz illustration"><p class="small">Standard quiz picture · add your own to replace it.</p>`}<label class="field" for="image-${i}">${q.image ? 'Replace picture' : 'Upload picture'}</label><input class="input" id="image-${i}" type="file" accept="image/png,image/jpeg,image/webp,image/gif" data-image="${i}"><p class="small">PNG, JPEG, WebP or GIF · up to 50 MB.</p>${pictureUrlControls(`question-${i}`)}${q.image ? `<label class="field" for="alt-${i}">Picture description</label><input class="input" id="alt-${i}" data-image-alt maxlength="200" placeholder="Describe the picture for players using a screen reader" value="${escapeHTML(q.imageAlt)}">` : ''}<label class="reveal-picture-toggle"><input type="checkbox" data-reveal-image ${q.showRevealImage ? 'checked' : ''}> Show an extra picture after answers are revealed</label>${q.showRevealImage ? `<div class="reveal-picture-settings">${q.revealImage ? `<img class="editor-image" src="${escapeHTML(q.revealImage)}" alt="${escapeHTML(q.revealImageAlt || 'Answer explanation picture')}"><button class="btn subtle" type="button" data-remove-reveal-image="${i}">Remove extra picture</button>` : '<p class="small">Add an explanation picture below.</p>'}<label class="field" for="reveal-image-${i}">${q.revealImage ? 'Replace picture' : 'Upload picture'}</label><input class="input" id="reveal-image-${i}" type="file" accept="image/png,image/jpeg,image/webp,image/gif" data-image="reveal-${i}"><p class="small">PNG, JPEG, WebP or GIF · up to 50 MB.</p>${pictureUrlControls(`reveal-${i}`)}${q.revealImage ? `<label class="field" for="reveal-alt-${i}">Picture description</label><input class="input" id="reveal-alt-${i}" data-reveal-image-alt maxlength="200" placeholder="Describe how this picture explains the answer" value="${escapeHTML(q.revealImageAlt || '')}">` : ''}</div>` : ''}</div>
+    <div class="image-editor">${q.image ? `<img class="editor-image" src="${escapeHTML(q.image)}" alt="${escapeHTML(q.imageAlt || 'Question image')}"><button class="btn subtle" type="button" data-remove-image="${i}">Remove picture</button>` : `<img class="default-image" src="${defaultPicture(q)}" alt="Colourful quiz illustration"><p class="small">${type === 'pixel-reveal' ? 'Add the picture players will guess. A picture is required for this question type.' : 'Standard quiz picture · add your own to replace it.'}</p>`}<label class="field" for="image-${i}">${q.image ? 'Replace picture' : 'Upload picture'}</label><input class="input" id="image-${i}" type="file" accept="image/png,image/jpeg,image/webp,image/gif" data-image="${i}"><p class="small">PNG, JPEG, WebP or GIF · up to 50 MB.</p>${pictureUrlControls(`question-${i}`)}${q.image ? `<label class="field" for="alt-${i}">Picture description</label><input class="input" id="alt-${i}" data-image-alt maxlength="200" placeholder="Describe the picture for players using a screen reader" value="${escapeHTML(q.imageAlt)}">` : ''}<label class="reveal-picture-toggle"><input type="checkbox" data-reveal-image ${q.showRevealImage ? 'checked' : ''}> Show an extra picture after answers are revealed</label>${q.showRevealImage ? `<div class="reveal-picture-settings">${q.revealImage ? `<img class="editor-image" src="${escapeHTML(q.revealImage)}" alt="${escapeHTML(q.revealImageAlt || 'Answer explanation picture')}"><button class="btn subtle" type="button" data-remove-reveal-image="${i}">Remove extra picture</button>` : '<p class="small">Add an explanation picture below.</p>'}<label class="field" for="reveal-image-${i}">${q.revealImage ? 'Replace picture' : 'Upload picture'}</label><input class="input" id="reveal-image-${i}" type="file" accept="image/png,image/jpeg,image/webp,image/gif" data-image="reveal-${i}"><p class="small">PNG, JPEG, WebP or GIF · up to 50 MB.</p>${pictureUrlControls(`reveal-${i}`)}${q.revealImage ? `<label class="field" for="reveal-alt-${i}">Picture description</label><input class="input" id="reveal-alt-${i}" data-reveal-image-alt maxlength="200" placeholder="Describe how this picture explains the answer" value="${escapeHTML(q.revealImageAlt || '')}">` : ''}</div>` : ''}</div>
     ${answers}<div class="form-row"><label class="field" for="time-${i}" style="margin:0">Answer time</label><select class="input" id="time-${i}" data-time>${[...new Set([5,10,20,30,60,90,120,q.timeLimit])].sort((a,b) => a-b).map(t => `<option value="${t}" ${q.timeLimit === t ? 'selected' : ''}>${t} sec</option>`).join('')}</select><span class="small">Starts when the host opens answers.</span></div>
   </article>`;
 }
@@ -364,8 +364,8 @@ function editor() {
   app.querySelectorAll('[data-type]').forEach(select => select.onchange = () => {
     readDraft(); const q = draft.questions[Number(select.dataset.type)];
     if (q.type === 'true-false') { q.answers = ['True','False']; q.correctIndex = Math.min(q.correctIndex, 1); }
-    else if (q.type !== 'type-answer' && q.answers.length < 2) q.answers = ['','','',''];
-    if (q.type === 'type-answer' && !q.acceptedAnswers?.length) q.acceptedAnswers = [''];
+    else if (q.type !== 'type-answer' && q.type !== 'pixel-reveal' && q.answers.length < 2) q.answers = ['','','',''];
+    if ((q.type === 'type-answer' || q.type === 'pixel-reveal') && !q.acceptedAnswers?.length) q.acceptedAnswers = [''];
     editor(); scheduleDraftSave();
   });
   app.querySelectorAll('[data-remove-image]').forEach(button => button.onclick = () => { readDraft(); draft.questions[Number(button.dataset.removeImage)].image = ''; editor(); scheduleDraftSave(); });
@@ -490,10 +490,10 @@ function updateScoreboardReveal() {
 }
 function questionContent(s) {
   const q = s.question, host = s.host, preview = s.status === 'preview', reveal = s.status === 'reveal';
-  const answerOnly = !host && playerAnswerOnly && s.status === 'question';
-  const mapPin = q.type === 'map-pin';
-  const typed = q.type === 'type-answer', poll = q.type === 'poll';
-  const image = mapPin && !preview ? '' : `<figure class="question-picture"><img src="${escapeHTML(q.image || defaultPicture(q))}" alt="${escapeHTML(q.image ? q.imageAlt || 'Question picture' : 'Colourful quiz illustration')}"></figure>`;
+  const mapPin = q.type === 'map-pin', pixel = q.type === 'pixel-reveal';
+  const answerOnly = !host && playerAnswerOnly && s.status === 'question' && !pixel;
+  const typed = q.type === 'type-answer' || pixel, poll = q.type === 'poll';
+  const image = mapPin && !preview ? '' : pixel && !reveal ? `<figure class="question-picture pixel-picture"><canvas data-pixel-src="${escapeHTML(q.image)}" role="img" aria-label="Pixelated picture that sharpens as time runs out"></canvas></figure>` : `<figure class="question-picture"><img src="${escapeHTML(q.image || defaultPicture(q))}" alt="${escapeHTML(q.image ? q.imageAlt || 'Question picture' : 'Colourful quiz illustration')}"></figure>`;
   const revealImage = reveal && !mapPin && q.revealImage ? `<figure class="question-picture explanation-picture"><figcaption>More context</figcaption><img src="${escapeHTML(q.revealImage)}" alt="${escapeHTML(q.revealImageAlt || 'Answer explanation picture')}"></figure>` : '';
   const heading = `<p class="eyebrow">${escapeHTML(questionTypes[q.type] || questionTypes.quiz)} · Question ${s.questionIndex + 1} of ${s.questionCount}</p><h1>${escapeHTML(q.question)}</h1>${image}`;
   if (preview) return `${heading}<div class="preview-note"><span class="badge">TAKE A LOOK</span>${s.previewEndsAt ? '<div class="preview-countdown"><span>Answers in</span><strong id="preview-countdown">5</strong></div>' : '<p>Read the question and study the picture. Answers will open when the host is ready.</p>'}</div>${host ? `<button class="btn light${mapPin ? ' map-host-action' : ''}" data-action="open">Open answers →</button>` : ''}`;
@@ -515,6 +515,31 @@ function questionContent(s) {
   return `${showHeading ? heading : ''}${meta}${answerView}${controls}${feedback}${revealImage}${reveal && !poll ? leaderboard(s.leaderboard) : ''}${host ? `<div class="lobby-actions${mapPin ? ' map-host-actions' : ''}"><button class="btn light" data-action="next">${!reveal ? (poll ? 'Show votes' : 'Reveal answers') : s.questionIndex + 1 === s.questionCount ? 'Show podium 🏆' : 'Next question →'}</button><button class="btn ghost" data-action="end">End game</button></div>` : reveal ? '<p class="muted-white">Waiting for the host…</p>' : ''}`;
 }
 const pendingPins = new Map();
+const pixelImages = new Map();
+function drawPixelPictures() {
+  const q = roomState?.question;
+  document.querySelectorAll('canvas[data-pixel-src]').forEach(canvas => {
+    const source = canvas.dataset.pixelSrc;
+    let image = pixelImages.get(source);
+    if (!image) { image = new Image(); image.onload = drawPixelPictures; image.src = source; pixelImages.set(source, image); }
+    if (!image.complete || !image.naturalWidth || !q) return;
+    // Sharpen from coarse blocks when answers open to the original picture with one second left.
+    const progress = roomState.status === 'question' ? Math.min(1, Math.max(0, (Date.now() - q.startedAt) / Math.max(1, q.deadline - q.startedAt - 1000))) : 0;
+    const scale = Math.min(1, 1200 / Math.max(image.naturalWidth, image.naturalHeight));
+    const width = Math.max(1, Math.round(image.naturalWidth * scale)), height = Math.max(1, Math.round(image.naturalHeight * scale));
+    const blocks = progress >= 1 ? width : Math.min(width, Math.round(4 * (width / 4) ** (progress ** 1.5)));
+    const key = `${width}x${height}:${blocks}`;
+    if (canvas.dataset.drawn === key) return;
+    canvas.dataset.drawn = key; canvas.width = width; canvas.height = height;
+    const context = canvas.getContext('2d');
+    if (blocks >= width) { context.drawImage(image, 0, 0, width, height); return; }
+    const small = document.createElement('canvas');
+    small.width = blocks; small.height = Math.max(1, Math.round(blocks * height / width));
+    small.getContext('2d').drawImage(image, 0, 0, small.width, small.height);
+    context.imageSmoothingEnabled = false;
+    context.drawImage(small, 0, 0, width, height);
+  });
+}
 function renderRoom() {
   clearQuizMaps();
   const oldInput = document.querySelector('#typed-answer');
@@ -539,6 +564,7 @@ function renderRoom() {
   }
   app.innerHTML = `<section class="room">${bar}${content}</section>`;
   updateScoreboardReveal();
+  drawPixelPictures();
   const typedInput = document.querySelector('#typed-answer');
   if (typedInput && inputDraft?.index === s.questionIndex) {
     typedInput.value = inputDraft.value;
@@ -605,6 +631,7 @@ function updateTimer() {
   if(roomState.status==='countdown') { updateCountdown(document.querySelector('#start-countdown'),roomState.countdownEndsAt); return; }
   if(roomState.status==='preview'&&roomState.previewEndsAt) updateCountdown(document.querySelector('#preview-countdown'),roomState.previewEndsAt);
   if(roomState.status!=='question')return;
+  drawPixelPictures();
   const remaining=Math.max(0,roomState.question.deadline-Date.now());
   const el=document.querySelector('#timer');if(el)el.textContent=Math.ceil(remaining/1000);
   const progress=document.querySelector('#time-progress');if(progress)progress.style.width=`${remaining/(roomState.question.timeLimit*1000)*100}%`;
