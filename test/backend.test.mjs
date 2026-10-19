@@ -377,6 +377,37 @@ test('map pins can start zoomed near the target without revealing it', async t =
   assert.equal((await state(player)).question.startView,undefined);
 });
 
+test('placed map pins count without lock-in and can be moved until locked', async t => {
+  const f = await fixture(t);
+  const question = {type:'map-pin', question:'Find the target', target:{lat:0,lng:0}, maxDistanceKm:1000, timeLimit:30};
+  const room = (await f.request('/api/rooms',{method:'POST',token:'map-test-owner-token',body:{quiz:{title:'Unlocked pins',questions:[question,{type:'quiz',question:'Pick',answers:['A','B'],correctIndex:0,timeLimit:20}]}}})).data;
+  const route = `/api/rooms/${room.pin}`;
+  const players = [];
+  for (const nickname of ['Mover','Locker','Idle']) players.push((await f.request(`${route}/join`,{method:'POST',body:{nickname}})).data.playerToken);
+  const action = name => f.request(`${route}/${name}`,{method:'POST',token:room.hostToken});
+  const state = token => f.request(`${route}/state`,{token}).then(r=>r.data);
+  const pin = (token,lng) => f.request(`${route}/pin`,{method:'POST',token,body:{questionIndex:0,answerLocation:{lat:0,lng}}});
+  assert.equal((await pin(players[0],0)).status,409);
+  await action('start'); await action('open');
+  assert.equal((await f.request(`${route}/pin`,{method:'POST',token:room.hostToken,body:{questionIndex:0,answerLocation:{lat:0,lng:0}}})).status,403);
+  assert.equal((await pin(players[0],181)).status,400);
+  assert.equal((await pin(players[0],5)).status,200);
+  assert.equal((await pin(players[0],1)).status,200);
+  const moved = await state(players[0]);
+  assert.equal(moved.self.answered,false); assert.deepEqual(moved.self.pendingLocation,{lat:0,lng:1}); assert.equal(moved.answeredCount,0);
+  assert.equal((await pin(players[1],20)).status,200);
+  assert.equal((await f.request(`${route}/answer`,{method:'POST',token:players[1],body:{questionIndex:0,answerLocation:{lat:0,lng:0}}})).status,200);
+  assert.equal((await pin(players[1],20)).status,409);
+  assert.equal((await state(players[1])).self.pendingLocation,undefined);
+  await action('next');
+  const mover = await state(players[0]), locker = await state(players[1]), idle = await state(players[2]);
+  assert.equal(mover.self.points,889); assert.equal(mover.self.score,889); assert.deepEqual(mover.self.answerLocation,{lat:0,lng:1});
+  assert.equal(locker.self.points,1000); assert.equal(locker.self.correct,true);
+  assert.equal(idle.self.points,0); assert.equal(idle.self.answerLocation,undefined);
+  await action('next'); await action('open');
+  assert.equal((await f.request(`${route}/pin`,{method:'POST',token:players[0],body:{questionIndex:1,answerLocation:{lat:0,lng:0}}})).status,400);
+});
+
 test('map pins validate, hide the target, and award distance-based points once', async t => {
   const f = await fixture(t);
   const question = {type:'map-pin', question:'Find the target', target:{lat:0,lng:0}, maxDistanceKm:1000, timeLimit:30};

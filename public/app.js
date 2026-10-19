@@ -516,7 +516,8 @@ function questionContent(s) {
   let controls;
   if (mapPin) {
     const editable = !host && !reveal && !s.self?.answered;
-    controls = `<div class="map-answer"><p class="visually-hidden">${reveal ? 'Correct location and your pin.' : editable ? 'Pan and zoom, then tap the map to place your pin. Your pin is your answer.' : host ? 'Players are placing their pins.' : 'Pin locked in. Waiting for the reveal.'}</p><div id="answer-map" class="quiz-map" aria-label="Answer map"></div><p class="map-status" data-map-status role="status"></p>${editable ? `<form id="map-answer-form" class="map-answer-controls">${locationFields(s.self.answerLocation)}<button class="btn primary map-coordinate-toggle" type="button" aria-expanded="false">Enter coordinates</button></form>` : ''}</div>`;
+    const hasPin = !!s.self?.answerLocation || !!s.self?.pendingLocation || pendingPins.has(`${s.pin}:${s.questionIndex}`);
+    controls = `<div class="map-answer"><p class="visually-hidden">${reveal ? 'Correct location and your pin.' : editable ? 'Tap the map to place your pin and tap again to move it. Lock it in when you are sure. A pin that is not locked in still counts when time runs out.' : host ? 'Players are placing their pins.' : 'Pin locked in. Waiting for the reveal.'}</p><div id="answer-map" class="quiz-map" aria-label="Answer map"></div><p class="map-status" data-map-status role="status"></p>${editable ? `<form id="map-answer-form" class="map-answer-controls">${locationFields(s.self.answerLocation)}<button class="btn primary map-coordinate-toggle" type="button" aria-expanded="false">Enter coordinates</button><button class="btn primary map-lock-button" type="submit" ${hasPin ? '' : 'disabled'}>Lock in pin →</button></form>` : ''}</div>`;
   } else if (typed) {
     controls = reveal ? `<div class="feedback">Accepted answers: ${q.acceptedAnswers.map(escapeHTML).join(' · ')}</div>` : host ? '<p class="waiting-answer">Players are typing their answers…</p>' : s.self.answered ? '<p class="waiting-answer">Answer locked in. Fingers crossed!</p>' : `<form id="typed-answer-form" class="card typed-answer"><label class="field" for="typed-answer">Your answer</label><input class="input" id="typed-answer" data-question-index="${s.questionIndex}" maxlength="200" required autocomplete="off" placeholder="Type your answer…"><button class="btn primary wide" type="submit">Lock in answer →</button></form>`;
   } else {
@@ -529,6 +530,14 @@ function questionContent(s) {
   return `${showHeading ? heading : ''}${meta}${answerView}${controls}${feedback}${revealImage}${reveal && !poll ? leaderboard(s.leaderboard) : ''}${host ? `<div class="lobby-actions${mapPin ? ' map-host-actions' : ''}"><button class="btn light" data-action="next">${!reveal ? (poll ? 'Show votes' : 'Reveal answers') : s.questionIndex + 1 === s.questionCount ? 'Show podium 🏆' : 'Next question →'}</button><button class="btn ghost" data-action="end">End game</button></div>` : reveal ? '<p class="muted-white">Waiting for the host…</p>' : ''}`;
 }
 const pendingPins = new Map();
+// Sends placed map pins to the server one at a time, skipping to the newest so an older pin never lands last.
+const pinSync = {sending:false, next:null};
+async function syncPin(send) {
+  pinSync.next = send; if (pinSync.sending) return;
+  pinSync.sending = true;
+  try { while (pinSync.next) { const job = pinSync.next; pinSync.next = null; try { await job(); } catch (error) { toast(error.message); } } }
+  finally { pinSync.sending = false; }
+}
 const pixelImages = new Map();
 function drawPixelPictures() {
   const q = roomState?.question;
@@ -597,9 +606,9 @@ function renderRoom() {
   const mapElement = document.querySelector('#answer-map');
   if (mapElement) {
     const key = `${s.pin}:${s.questionIndex}`, form = document.querySelector('#map-answer-form');
-    const point = s.self?.answerLocation || (form ? pendingPins.get(key) : undefined);
+    const point = s.self?.answerLocation || (form ? pendingPins.get(key) || s.self?.pendingLocation : undefined);
     if (form && point) setLocationFields(form, point);
-    const widget = mountQuizMap(mapElement, {key:`room:${key}:${s.status}`, point, target:isReveal ? q.target : undefined, start:q.startView, hideLabels:!host && !isReveal, onSelect:form ? point => { pendingPins.set(key,point); setLocationFields(form,point); form.requestSubmit(); } : undefined});
+    const widget = mountQuizMap(mapElement, {key:`room:${key}:${s.status}`, point, target:isReveal ? q.target : undefined, start:q.startView, hideLabels:!host && !isReveal, onSelect:form ? point => { pendingPins.set(key,point); setLocationFields(form,point); form.querySelector('.map-lock-button').disabled=false; const questionIndex = s.questionIndex; syncPin(() => api(`/rooms/${s.pin}/pin`, {method:'POST', token, body:{answerLocation:point, questionIndex}})); } : undefined});
     if (form) {
       const coordinateToggle = form.querySelector('.map-coordinate-toggle');
       const coordinates = form.querySelector('.map-coordinates');
@@ -608,8 +617,7 @@ function renderRoom() {
         coordinateToggle.setAttribute('aria-expanded',String(open));
       };
       wireLocationFields(form, widget);
-      let sending = false;
-      form.addEventListener('submit', event => { event.preventDefault(); const answerLocation = readLocation(form); if (answerLocation && !sending) { sending = true; run(null, () => submitAnswer({answerLocation})).finally(() => { sending = false; }); } });
+      form.addEventListener('submit', event => { event.preventDefault(); const answerLocation = readLocation(form); if (answerLocation) run(event.submitter, () => submitAnswer({answerLocation})); });
     }
   }
   document.querySelector('#typed-answer-form')?.addEventListener('submit', event => {

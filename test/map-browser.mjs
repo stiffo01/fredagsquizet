@@ -112,10 +112,12 @@ try {
   assert.deepEqual(hiddenLabels,[['city-label','text-field','']],'player map label text should be suppressed while preserving non-label layers');
   await alice.call('Emulation.setDeviceMetricsOverride',{width:390,height:844,deviceScaleFactor:1,mobile:true});
   assert.equal(await alice.evaluate('document.documentElement.scrollWidth <= innerWidth'),true);
-  // Placing a pin submits it straight away; there is no lock-in step.
-  await alice.evaluate(`quizMaps[0].map.fire('click',{latlng:L.latLng(0,1)}); void 0;`);
-  await alice.wait('document.querySelector(".answer-count").textContent.includes("1 / 2") && !document.querySelector("#map-answer-form")');
-  await bob.evaluate(`quizMaps[0].map.fire('click',{latlng:L.latLng(0,0)}); void 0;`);
+  await alice.evaluate(`quizMaps[0].map.fire('click',{latlng:L.latLng(0,1)}); quizMaps[0].map.setView([0,1],6,{animate:false}); void 0;`);
+  await bob.evaluate(`quizMaps[0].map.fire('click',{latlng:L.latLng(0,0)}); document.querySelector('#map-answer-form').requestSubmit()`);
+  await alice.wait('document.querySelector(".answer-count").textContent.includes("1 / 2")');
+  assert.equal(await alice.evaluate('document.querySelector("[data-lng]").value'),'1');
+  assert.equal(await alice.evaluate('quizMaps[0].map.getZoom()'),6);
+  await alice.evaluate(`document.querySelector('#map-answer-form').requestSubmit()`);
   await alice.wait('document.body.innerText.includes("+889 points")');
   await bob.wait('document.body.innerText.includes("+1000 points")');
   await host.wait('document.querySelector(".room [data-action=next]")?.textContent.includes("Show podium") && document.querySelectorAll(".room .quiz-map-pin").length === 1');

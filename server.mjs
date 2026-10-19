@@ -145,13 +145,22 @@ export function createApp({ dataDir = process.env.DATA_DIR || path.join(baseDir,
     }
     if (room.status === 'preview' && room.previewEndsAt) result.previewEndsAt = room.previewEndsAt;
     if (!who.host) {
-      result.self = { id: who.id, nickname: who.nickname, emoji: who.emoji, score: who.score, answered: who.answer !== undefined, ...(question?.type === 'map-pin' ? {answerLocation: who.answer} : typeof who.answer === 'number' ? {answerIndex: who.answer} : {answerText: who.answer}) };
+      result.self = { id: who.id, nickname: who.nickname, emoji: who.emoji, score: who.score, answered: who.answer !== undefined, ...(question?.type === 'map-pin' ? {answerLocation: who.answer, pendingLocation: who.answer === undefined ? who.pendingLocation : undefined} : typeof who.answer === 'number' ? {answerIndex: who.answer} : {answerText: who.answer}) };
       if (room.status === 'reveal' || room.status === 'finished') { result.self.correct = who.answer !== undefined && who.correct === true; result.self.points = who.points || 0; if (question?.type === 'map-pin' && who.answer !== undefined) result.self.distanceKm = who.distanceKm; }
     }
     return result;
   };
   const broadcast = room => { room.revision++; for (const client of room.clients) client.res.write(`event: state\ndata: ${JSON.stringify(state(room, client.who))}\n\n`); };
-  const reveal = room => { if (room.status !== 'question') return; clearTimeout(room.timer); for (const p of room.players.values()) p.score += p.points || 0; room.status = 'reveal'; broadcast(room); };
+  const reveal = room => {
+    if (room.status !== 'question') return; clearTimeout(room.timer);
+    // Map pins that were placed but never locked in still count as the answer.
+    const q = room.quiz.questions[room.index];
+    if (q.type === 'map-pin') for (const p of room.players.values()) if (p.answer === undefined && p.pendingLocation) {
+      p.answer = p.pendingLocation; p.distanceKm = distanceKm(p.answer, q.target); p.points = mapPoints(p.distanceKm, q.maxDistanceKm); p.correct = p.points === 1000;
+      if (p.correct) p.correctAnswers++;
+    }
+    for (const p of room.players.values()) p.score += p.points || 0; room.status = 'reveal'; broadcast(room);
+  };
   const showPreview = (room, automatic = false) => {
     clearTimeout(room.timer);
     room.status = 'preview'; room.startedAt = undefined; room.deadline = undefined;
@@ -176,7 +185,7 @@ export function createApp({ dataDir = process.env.DATA_DIR || path.join(baseDir,
     room.previewEndsAt = undefined;
     room.index++;
     if (room.index >= room.quiz.questions.length) { room.index = room.quiz.questions.length - 1; room.status = 'finished'; room.scoreboardVisible = false; room.scoreboardShownAt = undefined; room.scoreboardDeleted = false; recordHistory(room); broadcast(room); return; }
-    for (const p of room.players.values()) { p.answer = undefined; p.points = 0; p.correct = false; p.distanceKm = undefined; }
+    for (const p of room.players.values()) { p.answer = undefined; p.pendingLocation = undefined; p.points = 0; p.correct = false; p.distanceKm = undefined; }
     showPreview(room, true);
   };
   const openAnswers = room => {
@@ -316,6 +325,17 @@ export function createApp({ dataDir = process.env.DATA_DIR || path.join(baseDir,
           const client = { res, who }; room.clients.add(client); res.write(`event: state\ndata: ${JSON.stringify(state(room, who))}\n\n`);
           const heartbeat = setInterval(() => res.write('event: ping\ndata: {}\n\n'), 3000); heartbeat.unref();
           res.on('close', () => { clearInterval(heartbeat); room.clients.delete(client); }); return;
+        }
+        if (req.method === 'POST' && action === 'pin') {
+          if (who.host) fail(403, 'Only players can place pins.');
+          const { answerLocation, questionIndex } = await body(req);
+          if (room.status !== 'question' || Date.now() >= room.deadline) { reveal(room); fail(409, 'Answers are closed.'); }
+          if (questionIndex !== room.index) fail(409, 'This question is no longer active.');
+          if (room.quiz.questions[room.index].type !== 'map-pin') fail(400, 'This question has no map.');
+          if (who.answer !== undefined) fail(409, 'Your pin is already locked in.');
+          if (!validLocation(answerLocation)) fail(400, 'Choose a valid location on the map.');
+          who.pendingLocation = { lat: answerLocation.lat, lng: answerLocation.lng };
+          return send(res, 200, { ok: true });
         }
         if (req.method === 'POST' && action === 'answer') {
           if (who.host) fail(403, 'Only players can answer.');
