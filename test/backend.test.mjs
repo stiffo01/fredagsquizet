@@ -163,6 +163,27 @@ test('a join whose body finishes after the host starts is rejected', async t => 
   assert.equal((await f.request(`${route}/state`, { token: room.hostToken })).data.players.length, 1);
 });
 
+test('finished games are kept in the leaderboard history across restarts until removed', async t => {
+  const f = await fixture(t);
+  const room = (await f.request('/api/rooms',{method:'POST',body:{quiz}})).data;
+  const route = `/api/rooms/${room.pin}`;
+  await f.request(`${route}/join`,{method:'POST',body:{nickname:'Alice'}});
+  const host = action => f.request(`${route}/${action}`,{method:'POST',token:room.hostToken});
+  await host('start'); await host('open');
+  assert.deepEqual((await f.request('/api/history')).data,[]);
+  await host('end');
+  assert.equal((await fetch(`${f.base}/api/history`)).status,401,'history requires host sign-in');
+  const empty = (await f.request('/api/rooms',{method:'POST',body:{quiz}})).data;
+  await f.request(`/api/rooms/${empty.pin}/end`,{method:'POST'});
+  await f.restart();
+  let history = (await f.request('/api/history')).data;
+  assert.equal(history.length,1,'games ended before anyone played are not kept');
+  assert.equal(history[0].quizTitle,quiz.title);assert.equal(history[0].pin,room.pin);assert.equal(history[0].playerCount,1);
+  assert.equal(history[0].leaderboard[0].nickname,'Alice');assert.equal(history[0].leaderboard[0].id,undefined);
+  assert.equal((await f.request(`/api/history/${history[0].id}`,{method:'DELETE'})).status,200);
+  assert.deepEqual((await f.request('/api/history')).data,[]);
+});
+
 test('saved quizzes survive restart and remain scoped to the browser owner', async t => {
   const f = await fixture(t); const token = 'owner-one-long-enough'; const other = 'owner-two-long-enough';
   assert.equal((await f.request('/api/quizzes')).data[0].id, 'sample');

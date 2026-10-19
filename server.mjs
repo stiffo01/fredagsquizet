@@ -95,6 +95,18 @@ export function createApp({ dataDir = process.env.DATA_DIR || path.join(baseDir,
   const owner = req => { const token = bearer(req); if (!token || token.length < 16 || token.length > 256) fail(401, 'A browser owner token is required.'); return ownerHash(token); };
   const publicQuiz = ({ owner: ignored, ...quiz }) => quiz;
   const rank = room => [...room.players.values()].map(p => ({ id: p.id, nickname: p.nickname, emoji: p.emoji, score: p.score, correctAnswers: p.correctAnswers })).sort((a, b) => b.score - a.score || a.nickname.localeCompare(b.nickname)).map((p, i) => ({ ...p, rank: i + 1 }));
+  // Final leaderboards outlive the in-memory rooms so hosts can look back at earlier games.
+  const historyPath = path.join(dataDir, 'history.json');
+  let history = [];
+  try { history = JSON.parse(readFileSync(historyPath, 'utf8')); if (!Array.isArray(history)) throw new Error('Invalid leaderboard history'); }
+  catch (error) { if (error.code !== 'ENOENT') throw error; }
+  const persistHistory = next => { writeFileSync(`${historyPath}.tmp`, JSON.stringify(next, null, 2), { mode: 0o600 }); renameSync(`${historyPath}.tmp`, historyPath); history = next; };
+  const recordHistory = room => {
+    if (room.historyId || !room.players.size || !room.quiz.questions.some(q => q.type !== 'poll')) return;
+    room.historyId = randomUUID();
+    const leaderboard = rank(room).map(({ id: ignored, ...player }) => player);
+    persistHistory([{ id: room.historyId, pin: room.pin, quizId: room.quiz.id, quizTitle: room.quiz.title, finishedAt: Date.now(), playerCount: room.players.size, questionCount: room.quiz.questions.length, leaderboard }, ...history].slice(0, 500));
+  };
   const identity = (room, token) => token && token === room.hostToken ? { host: true } : room.players.get(token);
   const state = (room, who) => {
     const question = room.quiz.questions[room.index];
@@ -152,7 +164,7 @@ export function createApp({ dataDir = process.env.DATA_DIR || path.join(baseDir,
     clearTimeout(room.timer);
     room.previewEndsAt = undefined;
     room.index++;
-    if (room.index >= room.quiz.questions.length) { room.index = room.quiz.questions.length - 1; room.status = 'finished'; room.scoreboardVisible = false; room.scoreboardShownAt = undefined; room.scoreboardDeleted = false; broadcast(room); return; }
+    if (room.index >= room.quiz.questions.length) { room.index = room.quiz.questions.length - 1; room.status = 'finished'; room.scoreboardVisible = false; room.scoreboardShownAt = undefined; room.scoreboardDeleted = false; recordHistory(room); broadcast(room); return; }
     for (const p of room.players.values()) { p.answer = undefined; p.points = 0; p.correct = false; p.distanceKm = undefined; }
     showPreview(room, true);
   };
@@ -228,6 +240,16 @@ export function createApp({ dataDir = process.env.DATA_DIR || path.join(baseDir,
         if (!existing) fail(404, 'Quiz not found.');
         if (req.method === 'PUT') { const quiz = validateQuiz(await body(req), id); persist(saved.map(q => q === existing ? { ...quiz, owner: existing.owner || hash } : q)); return send(res, 200, quiz); }
         if (req.method === 'DELETE') { persist(saved.filter(q => q !== existing)); return send(res, 200, { ok: true }); }
+      }
+      if (parts[0] === 'api' && parts[1] === 'history') {
+        authorizeHost(req);
+        if (req.method === 'GET' && parts.length === 2) return send(res, 200, history);
+        if (req.method === 'DELETE' && parts.length === 3) {
+          if (!history.some(entry => entry.id === parts[2])) fail(404, 'Leaderboard not found.');
+          persistHistory(history.filter(entry => entry.id !== parts[2]));
+          return send(res, 200, { ok: true });
+        }
+        fail(404, 'Endpoint not found.');
       }
       if (parts[0] === 'api' && parts[1] === 'rooms') {
         if (req.method === 'GET' && parts.length === 2) {
@@ -329,8 +351,9 @@ export function createApp({ dataDir = process.env.DATA_DIR || path.join(baseDir,
             if (room.status !== 'finished') fail(409, 'The scoreboard can only be cleared after the game.');
             for (const player of room.players.values()) player.score = 0;
             room.scoreboardDeleted = true; room.scoreboardVisible = false; room.scoreboardShownAt = undefined; broadcast(room);
+            if (room.historyId) persistHistory(history.filter(entry => entry.id !== room.historyId));
           }
-          if (action === 'end') { if (room.status === 'question') reveal(room); clearTimeout(room.timer); room.status = 'finished'; room.scoreboardVisible = false; room.scoreboardShownAt = undefined; room.scoreboardDeleted = false; broadcast(room); }
+          if (action === 'end') { const played = !['lobby', 'countdown', 'finished'].includes(room.status); if (room.status === 'question') reveal(room); clearTimeout(room.timer); if (played) recordHistory(room); room.status = 'finished'; room.scoreboardVisible = false; room.scoreboardShownAt = undefined; room.scoreboardDeleted = false; broadcast(room); }
           return send(res, 200, state(room, who));
         }
         fail(404, 'Endpoint not found.');
