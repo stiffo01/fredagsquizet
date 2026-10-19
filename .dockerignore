@@ -11,4 +11,4 @@ compose.yaml
 Dockerfile
 *.log
 coverage
-*.backup_*
+**/*.backup_*
