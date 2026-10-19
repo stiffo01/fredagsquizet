@@ -107,6 +107,7 @@ export function createApp({ dataDir = process.env.DATA_DIR || path.join(baseDir,
         result.question.revealImageAlt = question.revealImageAlt || '';
       }
       if (question.type === 'map-pin') result.question.maxDistanceKm = question.maxDistanceKm;
+      if (question.type === 'pixel-reveal') { result.question.pixelRevealAt = question.pixelRevealAt ?? 2; result.question.pixelSpeed = question.pixelSpeed ?? 'normal'; }
       if (room.status !== 'preview') {
         result.question.answers = question.answers;
         result.question.startedAt = room.startedAt;

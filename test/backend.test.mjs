@@ -272,7 +272,14 @@ test('pixelated picture questions require a picture and score typed guesses', as
   const pixel = {type:'pixel-reveal',question:'What is in the picture?',image,acceptedAnswers:['Eiffel Tower','Eiffeltornet'],timeLimit:30};
   assert.equal((await f.request('/api/rooms',{method:'POST',body:{quiz:{title:'No picture',questions:[{...pixel,image:''}]}}})).status,400);
   assert.equal((await f.request('/api/rooms',{method:'POST',body:{quiz:{title:'No answers',questions:[{...pixel,acceptedAnswers:[]}]}}})).status,400);
-  const room = (await f.request('/api/rooms',{method:'POST',body:{quiz:{title:'Pixel quiz',questions:[pixel]}}})).data;
+  assert.equal((await f.request('/api/rooms',{method:'POST',body:{quiz:{title:'Bad reveal',questions:[{...pixel,pixelRevealAt:-1}]}}})).status,400);
+  assert.equal((await f.request('/api/rooms',{method:'POST',body:{quiz:{title:'Bad speed',questions:[{...pixel,pixelSpeed:'warp'}]}}})).status,400);
+  const defaults = (await f.request('/api/rooms',{method:'POST',body:{quiz:{title:'Defaults',questions:[pixel]}}})).data;
+  await f.request(`/api/rooms/${defaults.pin}/join`,{method:'POST',body:{nickname:'Dana'}});
+  await f.request(`/api/rooms/${defaults.pin}/start`,{method:'POST',token:defaults.hostToken});
+  const defaultState = (await f.request(`/api/rooms/${defaults.pin}/state`,{token:defaults.hostToken})).data;
+  assert.equal(defaultState.question.pixelRevealAt,2);assert.equal(defaultState.question.pixelSpeed,'normal');
+  const room = (await f.request('/api/rooms',{method:'POST',body:{quiz:{title:'Pixel quiz',questions:[{...pixel,pixelRevealAt:5,pixelSpeed:'fast'}]}}})).data;
   const route = `/api/rooms/${room.pin}`;
   const alice = (await f.request(`${route}/join`,{method:'POST',body:{nickname:'Alice'}})).data.playerToken;
   const bob = (await f.request(`${route}/join`,{method:'POST',body:{nickname:'Bob'}})).data.playerToken;
@@ -280,6 +287,7 @@ test('pixelated picture questions require a picture and score typed guesses', as
   await host('start');
   let state = (await f.request(`${route}/state`,{token:alice})).data;
   assert.equal(state.question.type,'pixel-reveal');assert.equal(state.question.image,image);assert.equal(state.question.acceptedAnswers,undefined);
+  assert.equal(state.question.pixelRevealAt,5);assert.equal(state.question.pixelSpeed,'fast');
   await host('open');
   assert.equal((await f.request(`${route}/answer`,{method:'POST',token:alice,body:{questionIndex:0,answerText:'  eiffeltornet '}})).status,200);
   assert.equal((await f.request(`${route}/answer`,{method:'POST',token:bob,body:{questionIndex:0,answerText:'Big Ben'}})).status,200);

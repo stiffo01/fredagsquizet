@@ -25,6 +25,9 @@ if (!ownerToken) { ownerToken = randomToken(); localStorage.setItem('fredagsquiz
 let stream, roomState, session, timer, roomSyncCleanup, statePoll, autosaveTimer, autosaveTask, autosavePending = false, quizzes = [], draft, routeVersion = 0, playerAnswerOnly = false;
 const questionTypes = {'quiz':'Multiple choice', 'true-false':'True or false', 'type-answer':'Type an answer', 'pixel-reveal':'Pixelated picture', 'poll':'Poll', 'map-pin':'Pin on a map'};
 const playerEmojis = ['😀', '😎', '🤓', '🥳', '🐸', '🦊', '🐼', '🐙', '🦄', '🐧', '🐢', '🦖', '🍕', '🚀', '⭐', '👾'];
+// When each speed reaches 80% of full resolution, as a share of the time before the original picture shows.
+const pixelSpeedLabels = {'slow':'Slow · stays blurry longest', 'normal':'Normal', 'fast':'Fast', 'very-fast':'Very fast · clear early'};
+const pixelSharpAt = {'slow':0.95, 'normal':0.8, 'fast':0.6, 'very-fast':0.4};
 const newQuestion = () => ({type:'quiz', question:'', image:'', imageAlt:'', revealImage:'', revealImageAlt:'', showRevealImage:false, answers:['','','',''], correctIndex:0, timeLimit:20});
 function toast(message) { const el = document.querySelector('#toast'); el.textContent = message; el.hidden = false; clearTimeout(toast.timeout); toast.timeout = setTimeout(() => el.hidden = true, 6000); }
 async function api(path, {method='GET', body, token=ownerToken, signal} = {}) {
@@ -193,6 +196,8 @@ function readDraft() {
     acceptedAnswers: (el.querySelector('[data-accepted]')?.value || '').split('\n').map(answer => answer.trim()).filter(Boolean),
     target: readLocation(el),
     maxDistanceKm: Number(el.querySelector('[data-map-distance]')?.value || 2000),
+    pixelRevealAt: Number(el.querySelector('[data-pixel-reveal-at]')?.value ?? 2),
+    pixelSpeed: el.querySelector('[data-pixel-speed]')?.value || 'normal',
     correctIndex: Number(el.querySelector('input[type=radio]:checked')?.value || 0),
     timeLimit: Number(el.querySelector('[data-time]').value)
   }));
@@ -319,7 +324,7 @@ function editorQuestion(q, i) {
   if (type === 'map-pin') {
     answers = `<p>Choose the correct location. Click or tap to place the pin, or use arrow keys to pan and Enter to pin the map centre.</p><div class="quiz-map" data-editor-map="${i}" aria-label="Correct location map"></div><p class="small" data-map-status role="status"></p>${locationFields(q.target)}<label class="field">Distance for zero points (km)<input class="input" data-map-distance type="number" min="1" max="20000" step="any" required value="${escapeHTML(q.maxDistanceKm || 2000)}"></label><p class="small">Up to 1,000 points for accuracy. Points decrease evenly to zero at this distance. No speed bonus.</p>`;
   } else if (type === 'type-answer' || type === 'pixel-reveal') {
-    answers = `${type === 'pixel-reveal' ? '<p class="small">Players see the picture pixelated. It sharpens as the answer time runs out and is shown in full with 2 seconds left. Faster correct guesses earn more points.</p>' : ''}<label class="field" for="accepted-${i}">Accepted answers (one per line)</label><textarea class="input" id="accepted-${i}" data-accepted rows="3" required placeholder="Stockholm\nStockholm city">${escapeHTML((q.acceptedAnswers || ['']).join('\n'))}</textarea><p class="small">Up to 10 accepted spellings. Capitalization and extra spaces are ignored.</p>`;
+    answers = `${type === 'pixel-reveal' ? `<p class="small">Players see the picture pixelated. It sharpens as the answer time runs out and is shown in full at the time you choose. Faster correct guesses earn more points.</p><div class="form-row"><label class="field" for="pixel-reveal-at-${i}" style="margin:0">Show original picture</label><select class="input" id="pixel-reveal-at-${i}" data-pixel-reveal-at>${[...new Set([0,1,2,3,5,10,15,20,30,q.pixelRevealAt ?? 2])].sort((a,b) => a-b).map(t => `<option value="${t}" ${(q.pixelRevealAt ?? 2) === t ? 'selected' : ''}>${t ? `${t} sec before time runs out` : 'When time runs out'}</option>`).join('')}</select></div><div class="form-row"><label class="field" for="pixel-speed-${i}" style="margin:0">Pixel effect speed</label><select class="input" id="pixel-speed-${i}" data-pixel-speed>${Object.entries(pixelSpeedLabels).map(([value, label]) => `<option value="${value}" ${(q.pixelSpeed || 'normal') === value ? 'selected' : ''}>${label}</option>`).join('')}</select><span class="small">How soon the picture gets clear. Normal is 80% sharp at 80% of the time.</span></div>` : ''}<label class="field" for="accepted-${i}">Accepted answers (one per line)</label><textarea class="input" id="accepted-${i}" data-accepted rows="3" required placeholder="Stockholm\nStockholm city">${escapeHTML((q.acceptedAnswers || ['']).join('\n'))}</textarea><p class="small">Up to 10 accepted spellings. Capitalization and extra spaces are ignored.</p>`;
   } else {
     answers = `<div class="answer-inputs">${q.answers.map((answer, j) => `<div class="answer-edit">${type !== 'poll' ? `<input type="radio" name="correct-${i}" value="${j}" ${q.correctIndex === j ? 'checked' : ''} aria-label="Mark answer ${j + 1} correct">` : ''}<span aria-hidden="true">${type === 'true-false' ? ['✓','✕'][j] : symbols[j]}</span><input class="input" data-answer required maxlength="200" placeholder="Answer ${j + 1}" aria-label="Question ${i + 1}, answer ${j + 1}" value="${escapeHTML(answer)}" ${type === 'true-false' ? 'readonly' : ''}></div>`).join('')}</div><p class="small">${type === 'poll' ? 'Everyone gets a vote. No correct answer and no points.' : 'Select the circle beside the correct answer.'}</p>`;
   }
@@ -523,12 +528,12 @@ function drawPixelPictures() {
     let image = pixelImages.get(source);
     if (!image) { image = new Image(); image.onload = drawPixelPictures; image.src = source; pixelImages.set(source, image); }
     if (!image.complete || !image.naturalWidth || !q) return;
-    // Sharpen from coarse blocks when answers open: 80% of full resolution at 80% of the reveal time, the original picture with two seconds left.
-    const progress = roomState.status === 'question' ? Math.min(1, Math.max(0, (Date.now() - q.startedAt) / Math.max(1, q.deadline - q.startedAt - 2000))) : 0;
+    // Sharpen from coarse blocks when answers open to the original picture at the host's chosen seconds left; the speed sets when it is 80% sharp.
+    const progress = roomState.status === 'question' ? Math.min(1, Math.max(0, (Date.now() - q.startedAt) / Math.max(1, q.deadline - q.startedAt - (q.pixelRevealAt ?? 2) * 1000))) : 0;
     const scale = Math.min(1, 1200 / Math.max(image.naturalWidth, image.naturalHeight));
     const width = Math.max(1, Math.round(image.naturalWidth * scale)), height = Math.max(1, Math.round(image.naturalHeight * scale));
-    const start = Math.min(width, 12), sharp = width * 0.8;
-    const blocks = progress >= 1 ? width : Math.round(progress < 0.8 ? start * (sharp / start) ** (progress / 0.8) : sharp + (width - sharp) * (progress - 0.8) / 0.2);
+    const start = Math.min(width, 12), sharp = width * 0.8, sharpAt = pixelSharpAt[q.pixelSpeed] ?? 0.8;
+    const blocks = progress >= 1 ? width : Math.round(progress < sharpAt ? start * (sharp / start) ** (progress / sharpAt) : sharp + (width - sharp) * (progress - sharpAt) / (1 - sharpAt));
     const key = `${width}x${height}:${blocks}`;
     if (canvas.dataset.drawn === key) return;
     canvas.dataset.drawn = key; canvas.width = width; canvas.height = height;
