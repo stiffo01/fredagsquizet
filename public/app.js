@@ -191,17 +191,28 @@ async function library(version) {
   app.innerHTML = '<section class="shell"><span class="spinner"></span><p style="text-align:center">Opening your quiz library…</p></section>';
   const [quizList, activeGames] = await Promise.all([api('/quizzes'), api('/rooms')]); quizzes = quizList; if (version !== routeVersion) return;
   const liveCount = activeGames.filter(game => game.status !== 'finished').length;
-  app.innerHTML = `<section class="shell"><div class="topline"><div><p class="eyebrow">The host's corner</p><h1>Your next great game.</h1><p>Pick a quiz, share the PIN, and bring the room to life.</p></div><div class="actions" style="margin-top:0"><a class="btn ghost" href="#games">🎮 Games${liveCount ? ` (${liveCount} live)` : ''}</a><a class="btn ghost" href="#history">🏆 Leaderboards</a><a class="btn light" href="#create">＋ Create quiz</a></div></div><div class="quiz-grid">${quizzes.map((q,i) => `<article class="card quiz-card"><div class="quiz-art">${q.coverImage ? `<img class="quiz-cover-thumb" src="${escapeHTML(q.coverImage)}" alt="${escapeHTML(q.coverImageAlt || `${q.title} cover`)}">` : `<span aria-hidden="true">${['✦','◎','✷'][i%3]}</span>`}</div><div class="quiz-body"><div><span class="badge">${q.id==='feature-test'?'FEATURE TEST':q.id==='sample'?'READY TO PLAY':'YOUR CREATION'}</span></div><h2 style="margin-top:14px">${escapeHTML(q.title)}</h2>${q.id==='feature-test'?'<p class="small">Try previews, pictures, question types, polls, and scoring with your group.</p>':''}${q.creator?`<p class="small quiz-creator">Created by ${escapeHTML(q.creator)}</p>`:''}<span class="small">${q.questions.length} questions · ${Math.ceil(q.questions.reduce((n,q)=>n+q.timeLimit,0)/60)} min of play</span><div class="actions"><button class="btn primary" data-host="${escapeHTML(q.id)}">${q.id==='feature-test'?'Host test →':'Host live →'}</button><button class="btn subtle" data-test-quiz="${escapeHTML(q.id)}">Test as player</button><button class="btn subtle" data-edit="${escapeHTML(q.id)}">${q.id==='sample'||q.id==='feature-test'?'Copy':'Edit'}</button>${q.id==='feature-test'?'':`<button class="btn subtle" data-delete="${escapeHTML(q.id)}" aria-label="Remove ${escapeHTML(q.title)}">×</button>`}</div></div></article>`).join('')}</div><p class="small muted-white" style="margin-top:28px">Your quizzes are saved on this server. Use this browser to manage them.</p></section>`;
+  app.innerHTML = `<section class="shell"><div class="topline"><div><p class="eyebrow">The host's corner</p><h1>Your next great game.</h1><p>Pick a quiz, share the PIN, and bring the room to life.</p></div><div class="actions" style="margin-top:0"><a class="btn ghost" href="#games">🎮 Games${liveCount ? ` (${liveCount} live)` : ''}</a><a class="btn ghost" href="#history">🏆 Leaderboards</a><a class="btn light" href="#create">＋ Create quiz</a></div></div><div class="quiz-grid">${quizzes.map((q,i) => `<article class="card quiz-card"><div class="quiz-art">${q.coverImage ? `<img class="quiz-cover-thumb" src="${escapeHTML(q.coverImage)}" alt="${escapeHTML(q.coverImageAlt || `${q.title} cover`)}">` : `<span aria-hidden="true">${['✦','◎','✷'][i%3]}</span>`}</div><div class="quiz-body"><div><span class="badge">${q.id==='feature-test'?'FEATURE TEST':q.id==='sample'?'READY TO PLAY':'YOUR CREATION'}</span></div><h2 style="margin-top:14px">${escapeHTML(q.title)}</h2>${q.id==='feature-test'?'<p class="small">Try previews, pictures, question types, polls, and scoring with your group.</p>':''}${q.creator?`<p class="small quiz-creator">Created by ${escapeHTML(q.creator)}</p>`:''}<span class="small">${q.questions.length} questions · ${Math.ceil(q.questions.reduce((n,q)=>n+q.timeLimit,0)/60)} min of play</span><div class="quiz-actions"><button class="btn primary" data-host="${escapeHTML(q.id)}">${q.id==='feature-test'?'Host test →':'Host live →'}</button><button class="btn subtle" data-test-quiz="${escapeHTML(q.id)}">Test as player</button><button class="btn subtle" data-edit="${escapeHTML(q.id)}">${q.id==='sample'||q.id==='feature-test'?'Copy':'Edit'}</button>${q.id==='feature-test'?'':`<button class="btn subtle remove-quiz" data-delete="${escapeHTML(q.id)}" aria-label="Remove ${escapeHTML(q.title)}">Remove</button>`}</div></div></article>`).join('')}</div><p class="small muted-white" style="margin-top:28px">Your quizzes are saved on this server. Use this browser to manage them.</p></section>`;
   app.querySelectorAll('[data-test-quiz]').forEach(button => button.onclick = () => run(button, () => startTestRun({quizId:button.dataset.testQuiz})));
   app.querySelectorAll('[data-host]').forEach(button => button.onclick = () => run(button, async () => {
     const result = await api('/rooms', {method:'POST', body:{quizId:button.dataset.host}});
     saveSession({pin:result.pin, token:result.hostToken, role:'host'});
   }));
   app.querySelectorAll('[data-edit]').forEach(button => button.onclick = () => { location.href = `/host#edit/${button.dataset.edit}`; });
-  app.querySelectorAll('[data-delete]').forEach(button => button.onclick = () => run(button, async () => {
-    if (!confirm('Delete this quiz from your library?')) return;
-    await api(`/quizzes/${button.dataset.delete}`, {method:'DELETE'}); await library(routeVersion);
-  }));
+  // The first click asks for confirmation on the button itself; a second click within 5 seconds removes the quiz.
+  app.querySelectorAll('[data-delete]').forEach(button => {
+    const label = button.getAttribute('aria-label');
+    let resetTimer;
+    const reset = () => { clearTimeout(resetTimer); button.classList.remove('confirming'); button.textContent = 'Remove'; button.setAttribute('aria-label', label); };
+    button.onclick = () => {
+      if (!button.classList.contains('confirming')) {
+        button.classList.add('confirming'); button.textContent = 'Confirm remove'; button.setAttribute('aria-label', `Confirm: ${label}`);
+        resetTimer = setTimeout(reset, 5000); return;
+      }
+      clearTimeout(resetTimer);
+      run(button, async () => { await api(`/quizzes/${button.dataset.delete}`, {method:'DELETE'}); await library(routeVersion); });
+    };
+    button.onblur = () => { if (!button.disabled) reset(); };
+  });
 }
 function readDraft() {
   draft.title = document.querySelector('#quiz-title').value;
