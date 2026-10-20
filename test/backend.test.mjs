@@ -532,3 +532,41 @@ test('gamble questions take bets blind, use fixed points, and never push a score
   assert.equal(scoreOf('BetMissed'),0);
   assert.equal(missed.self.points,0,'a lost bet cannot go below 0'); assert.equal(missed.self.score,0);
 });
+
+test('3 for 3 questions shuffle the pictures, hide the pairs, and score each right pair', async t => {
+  const f = await fixture(t);
+  const images = ['a', 'b', 'c'].map(letter => `/media/${letter.repeat(64)}.png`);
+  const question = {type:'match-3', question:'Match the capital to the flag', answers:['Stockholm','Oslo','Helsinki'], answerImages:images, timeLimit:20};
+  for (const invalid of [{...question,answerImages:images.slice(0,2)}, {...question,answers:['Stockholm','Oslo']}, {...question,answers:['Stockholm','Oslo',' ']}, {...question,answerImages:[...images.slice(0,2),'https://example.com/x.png']}]) {
+    assert.equal((await f.request('/api/quizzes',{method:'POST',token:'match-owner-token',body:{title:'Invalid match',questions:[invalid]}})).status,400);
+  }
+  const saved = (await f.request('/api/quizzes',{method:'POST',token:'match-owner-token',body:{title:'Match',questions:[question]}})).data;
+  assert.deepEqual(saved.questions[0].answerImages,images); assert.deepEqual(saved.questions[0].answers,question.answers);
+  const room = (await f.request('/api/rooms',{method:'POST',body:{quiz:{title:'Match',questions:[question]}}})).data;
+  const route = `/api/rooms/${room.pin}`;
+  const players = [];
+  for (const nickname of ['AllRight','OneRight','NoneRight']) players.push((await f.request(`${route}/join`,{method:'POST',body:{nickname}})).data.playerToken);
+  const action = name => f.request(`${route}/${name}`,{method:'POST',token:room.hostToken});
+  const state = token => f.request(`${route}/state`,{token}).then(r=>r.data);
+  await action('start');
+  assert.equal((await state(players[0])).question.answerImages,undefined,'pictures stay hidden in preview');
+  await action('open');
+  const open = await state(players[0]);
+  assert.deepEqual([...open.question.answerImages].sort(),[...images].sort());
+  assert.notDeepEqual(open.question.answerImages,images,'pictures are never shown in the written order');
+  assert.equal(open.question.correctMatches,undefined);
+  assert.deepEqual((await state(players[1])).question.answerImages,open.question.answerImages,'everyone sees the same order');
+  const right = question.answerImages.map(image => open.question.answerImages.indexOf(image));
+  // Swapping two letters leaves exactly one pair right; rotating all three leaves none.
+  const one = [right[0], right[2], right[1]], none = [right[1], right[2], right[0]];
+  for (const invalid of [[0,0,1],[0,1],[0,1,3],['0',1,2]]) assert.equal((await f.request(`${route}/answer`,{method:'POST',token:players[0],body:{questionIndex:0,matches:invalid}})).status,400);
+  for (const [i, matches] of [right, one, none].entries()) assert.equal((await f.request(`${route}/answer`,{method:'POST',token:players[i],body:{questionIndex:0,matches}})).status,200);
+  const [all, single, zero] = await Promise.all(players.map(state));
+  assert.equal(all.status,'reveal'); assert.deepEqual(all.question.correctMatches,right);
+  assert.equal(all.self.correct,true); assert.equal(all.self.matchedPairs,3); assert.ok(all.self.points > 500);
+  assert.deepEqual(single.self.answerMatches,one);
+  assert.equal(single.self.correct,false); assert.equal(single.self.matchedPairs,1); assert.ok(single.self.points >= 166 && single.self.points <= 334);
+  assert.equal(zero.self.matchedPairs,0); assert.equal(zero.self.points,0);
+  assert.equal(all.players.find(p => p.nickname === 'AllRight').correctAnswers,1);
+  assert.equal(all.players.find(p => p.nickname === 'OneRight').correctAnswers,0);
+});
