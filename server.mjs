@@ -8,7 +8,7 @@ import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import QRCode from 'qrcode';
-import { sampleQuiz, featureTestQuiz, validateQuiz, validLocation, distanceKm, mapPoints, normalizeAnswer, mediaPathPattern, playerEmojis } from './lib/quiz.mjs';
+import { sampleQuiz, featureTestQuiz, validateQuiz, validLocation, distanceKm, mapPoints, gambleResult, normalizeAnswer, mediaPathPattern, playerEmojis } from './lib/quiz.mjs';
 
 const baseDir = path.dirname(fileURLToPath(import.meta.url));
 const secret = () => randomBytes(24).toString('base64url');
@@ -66,7 +66,7 @@ function storeImage(image, mediaDir) {
   return { image: `/media/${filename}` };
 }
 
-export function createApp({ dataDir = process.env.DATA_DIR || path.join(baseDir, 'data'), publicDir = path.join(baseDir, 'public'), roomTtlMs = 6 * 60 * 60 * 1000, startCountdownMs = 10_000, firstPreviewMs = 5_000, hostUsername = process.env.HOST_USERNAME, hostPassword = process.env.HOST_PASSWORD } = {}) {
+export function createApp({ dataDir = process.env.DATA_DIR || path.join(baseDir, 'data'), publicDir = path.join(baseDir, 'public'), roomTtlMs = 6 * 60 * 60 * 1000, startCountdownMs = 10_000, firstPreviewMs = 5_000, gamblePreviewMs = 15_000, hostUsername = process.env.HOST_USERNAME, hostPassword = process.env.HOST_PASSWORD } = {}) {
   if (!hostUsername || !hostPassword) throw new Error('Set HOST_USERNAME and HOST_PASSWORD before starting Fredagsquizet.');
   const equalSecret = (provided, expected) => timingSafeEqual(createHash('sha256').update(provided).digest(), createHash('sha256').update(expected).digest());
   const authorizeHost = req => {
@@ -124,6 +124,11 @@ export function createApp({ dataDir = process.env.DATA_DIR || path.join(baseDir,
     if (room.status === 'countdown') result.countdownEndsAt = room.countdownEndsAt;
     if (question && ['preview', 'question', 'reveal', 'finished'].includes(room.status)) {
       result.question = { type: question.type ?? 'quiz', question: question.question, image: question.image || '', imageAlt: question.imageAlt || '', timeLimit: question.timeLimit };
+      if (question.gamble) {
+        result.question.gamble = true; result.question.gamblePoints = question.gamblePoints;
+        // Players bet before they see the question, so its heading and picture stay hidden while bets are placed.
+        if (room.status === 'preview') { result.question.question = ''; result.question.image = ''; result.question.imageAlt = ''; result.betCount = [...room.players.values()].filter(p => p.bet !== undefined).length; }
+      }
       if ((room.status === 'reveal' || room.status === 'finished') && question.showRevealImage) {
         result.question.revealImage = question.revealImage || '';
         result.question.revealImageAlt = question.revealImageAlt || '';
@@ -147,7 +152,7 @@ export function createApp({ dataDir = process.env.DATA_DIR || path.join(baseDir,
     }
     if (room.status === 'preview' && room.previewEndsAt) result.previewEndsAt = room.previewEndsAt;
     if (!who.host) {
-      result.self = { id: who.id, nickname: who.nickname, emoji: who.emoji, score: who.score, answered: who.answer !== undefined, ...(question?.type === 'map-pin' ? {answerLocation: who.answer, pendingLocation: who.answer === undefined ? who.pendingLocation : undefined} : typeof who.answer === 'number' ? {answerIndex: who.answer} : {answerText: who.answer}) };
+      result.self = { id: who.id, nickname: who.nickname, emoji: who.emoji, score: who.score, answered: who.answer !== undefined, ...(question?.gamble ? {bet: who.bet} : {}), ...(question?.type === 'map-pin' ? {answerLocation: who.answer, pendingLocation: who.answer === undefined ? who.pendingLocation : undefined} : typeof who.answer === 'number' ? {answerIndex: who.answer} : {answerText: who.answer}) };
       if (room.status === 'reveal' || room.status === 'finished') { result.self.correct = who.answer !== undefined && who.correct === true; result.self.points = who.points || 0; if (question?.type === 'map-pin' && who.answer !== undefined) result.self.distanceKm = who.distanceKm; }
     }
     return result;
@@ -161,15 +166,20 @@ export function createApp({ dataDir = process.env.DATA_DIR || path.join(baseDir,
       p.answer = p.pendingLocation; p.distanceKm = distanceKm(p.answer, q.target); p.points = mapPoints(p.distanceKm, q.maxDistanceKm); p.correct = p.points === 1000;
       if (p.correct) p.correctAnswers++;
     }
-    for (const p of room.players.values()) p.score += p.points || 0; room.status = 'reveal'; broadcast(room);
+    if (q.gamble) for (const p of room.players.values()) if (p.answer === undefined) p.points = gambleResult(q.gamblePoints, p.bet === true, false);
+    // A lost bet can take a score down to 0 but not below, so points show what was actually won or lost.
+    for (const p of room.players.values()) { const before = p.score; p.score = Math.max(0, p.score + (p.points || 0)); p.points = p.score - before; }
+    room.status = 'reveal'; broadcast(room);
   };
   const showPreview = (room, automatic = false) => {
     clearTimeout(room.timer);
     room.status = 'preview'; room.startedAt = undefined; room.deadline = undefined;
-    room.previewEndsAt = automatic ? Date.now() + firstPreviewMs : undefined;
+    // Gamble questions get longer to place bets; answers open early once everyone has chosen.
+    const previewMs = room.quiz.questions[room.index].gamble ? gamblePreviewMs : firstPreviewMs;
+    room.previewEndsAt = automatic ? Date.now() + previewMs : undefined;
     broadcast(room);
     if (automatic) {
-      room.timer = setTimeout(() => { if (room.status === 'preview' && room.previewEndsAt) openAnswers(room); }, firstPreviewMs);
+      room.timer = setTimeout(() => { if (room.status === 'preview' && room.previewEndsAt) openAnswers(room); }, previewMs);
       room.timer.unref();
     }
   };
@@ -187,7 +197,7 @@ export function createApp({ dataDir = process.env.DATA_DIR || path.join(baseDir,
     room.previewEndsAt = undefined;
     room.index++;
     if (room.index >= room.quiz.questions.length) { room.index = room.quiz.questions.length - 1; room.status = 'finished'; room.scoreboardVisible = false; room.scoreboardShownAt = undefined; room.scoreboardDeleted = false; recordHistory(room); broadcast(room); return; }
-    for (const p of room.players.values()) { p.answer = undefined; p.pendingLocation = undefined; p.points = 0; p.correct = false; p.distanceKm = undefined; }
+    for (const p of room.players.values()) { p.answer = undefined; p.pendingLocation = undefined; p.bet = undefined; p.points = 0; p.correct = false; p.distanceKm = undefined; }
     showPreview(room, true);
   };
   const openAnswers = room => {
@@ -339,6 +349,18 @@ export function createApp({ dataDir = process.env.DATA_DIR || path.join(baseDir,
           who.pendingLocation = { lat: answerLocation.lat, lng: answerLocation.lng };
           return send(res, 200, { ok: true });
         }
+        if (req.method === 'POST' && action === 'bet') {
+          if (who.host) fail(403, 'Only players can bet.');
+          const { bet, questionIndex } = await body(req);
+          if (room.status !== 'preview') fail(409, 'Betting is closed.');
+          if (questionIndex !== room.index) fail(409, 'This question is no longer active.');
+          if (!room.quiz.questions[room.index].gamble) fail(400, 'This question has no bet.');
+          if (typeof bet !== 'boolean') fail(400, 'Choose whether to bet.');
+          if (who.bet !== undefined) fail(409, 'Your choice is already locked in.');
+          who.bet = bet;
+          if ([...room.players.values()].every(p => p.bet !== undefined)) openAnswers(room); else broadcast(room);
+          return send(res, 200, { ok: true });
+        }
         if (req.method === 'POST' && action === 'answer') {
           if (who.host) fail(403, 'Only players can answer.');
           const { answerIndex, answerText, answerLocation, questionIndex } = await body(req);
@@ -358,7 +380,7 @@ export function createApp({ dataDir = process.env.DATA_DIR || path.join(baseDir,
             if (!Number.isInteger(answerIndex) || answerIndex < 0 || answerIndex >= q.answers.length) fail(400, 'Choose a valid answer.');
             who.answer = answerIndex; who.correct = q.type !== 'poll' && answerIndex === q.correctIndex;
           }
-          who.points = q.type === 'map-pin' ? mapPoints(who.distanceKm, q.maxDistanceKm) : who.correct ? Math.round(500 + 500 * Math.max(0, 1 - (Date.now() - room.startedAt) / (q.timeLimit * 1000))) : 0;
+          who.points = q.type === 'map-pin' ? mapPoints(who.distanceKm, q.maxDistanceKm) : q.gamble ? gambleResult(q.gamblePoints, who.bet === true, who.correct) : who.correct ? Math.round(500 + 500 * Math.max(0, 1 - (Date.now() - room.startedAt) / (q.timeLimit * 1000))) : 0;
           if (who.correct) who.correctAnswers++;
           if ([...room.players.values()].every(p => p.answer !== undefined)) reveal(room); else broadcast(room);
           return send(res, 200, { ok: true });
