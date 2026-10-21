@@ -213,3 +213,20 @@ body.playing-game .question-picture canvas{max-height:25svh}
 .slide-picture img{max-height:46vh}
 body.playing-game .room:has(.slide-text){overflow:auto}
 @media(max-width:700px){.slide-picture img{max-height:34vh}.slide-text{font-size:clamp(18px,5.5vw,26px)}.slide-text.long{font-size:16px}}
+
+/* Per-question picture size, chosen in the editor for computers/TVs and for phones */
+@media(min-width:701px){
+body.playing-game .question-picture.desktop-large img,body.playing-game .question-picture.desktop-large canvas{max-height:55svh}
+body.playing-game .question-picture.desktop-full img,body.playing-game .question-picture.desktop-full canvas{max-height:85svh}
+body.playing-game .room:has(.question-picture.desktop-large),body.playing-game .room:has(.question-picture.desktop-full){overflow:auto}
+}
+@media(max-width:700px){
+body.playing-game .question-picture.mobile-large img,body.playing-game .question-picture.mobile-large canvas{max-height:55svh}
+body.playing-game .question-picture.mobile-full img,body.playing-game .question-picture.mobile-full canvas{max-height:85svh}
+body.playing-game:not(.question-preview) .question-picture.mobile-large,body.playing-game:not(.question-preview) .question-picture.mobile-full{display:block}
+body.playing-game .room:has(.question-picture.mobile-large),body.playing-game .room:has(.question-picture.mobile-full){overflow:auto}
+}
+.picture-size-row{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:16px}
+.picture-size-row .field{margin:0 0 6px}
+.picture-size-row .input{margin:0}
+@media(max-width:600px){.picture-size-row{grid-template-columns:1fr}}

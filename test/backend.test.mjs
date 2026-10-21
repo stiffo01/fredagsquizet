@@ -260,7 +260,7 @@ test('mixed question types validate, preserve preview secrecy, and score typed a
   await new Promise(resolve=>setTimeout(resolve,1100));
   let state = (await f.request(`${route}/state`,{token:alice})).data;
   assert.equal(state.status,'preview','preview does not consume the answer timer');
-  assert.deepEqual(Object.keys(state.question).sort(),['type','question','image','imageAlt','timeLimit'].sort());
+  assert.deepEqual(Object.keys(state.question).sort(),['type','question','image','imageAlt','imageSizeDesktop','imageSizeMobile','timeLimit'].sort());
   assert.equal(state.question.revealImage,undefined,'the explanation image stays hidden during preview');
   assert.equal((await host('next')).status,409);
   state = (await host('open')).data;
@@ -612,4 +612,21 @@ test('slides show picture and text until the host moves on, take no answers, and
   assert.ok(finished.players[0].score >= 990 && finished.players[0].score <= 1000, 'only the real question scored');
   const unscored = (await f.request('/api/rooms', { method: 'POST', body: { quiz: { title: 'Only slides', questions: [{ type: 'slide', question: 'Hello' }, { type: 'poll', question: 'Mood?', answers: ['Good', 'Great'] }] } } })).data;
   assert.equal((await f.request(`/api/rooms/${unscored.pin}/state`, { token: unscored.hostToken })).data.hasScoredQuestions, false);
+});
+
+test('question pictures carry separate desktop and phone sizes into the game', async t => {
+  const f = await fixture(t);
+  const image = `/media/${'a'.repeat(64)}.png`;
+  const token = 'owner-sizes-long-enough';
+  assert.equal((await f.request('/api/quizzes', { method: 'POST', token, body: { title: 'Sizes', questions: [{ ...quiz.questions[0], image, imageSizeDesktop: 'huge' }] } })).status, 400, 'unknown sizes are rejected');
+  const saved = (await f.request('/api/quizzes', { method: 'POST', token, body: { title: 'Sizes', questions: [{ ...quiz.questions[0], image, imageSizeDesktop: 'full', imageSizeMobile: 'large' }, quiz.questions[1]] } })).data;
+  assert.equal(saved.questions[0].imageSizeDesktop, 'full');
+  assert.equal(saved.questions[0].imageSizeMobile, 'large');
+  assert.equal(saved.questions[1].imageSizeDesktop, 'normal', 'sizes default to normal');
+  const room = (await f.request('/api/rooms', { method: 'POST', body: { quiz: saved } })).data;
+  const player = (await f.request(`/api/rooms/${room.pin}/join`, { method: 'POST', body: { nickname: 'Viewer' } })).data.playerToken;
+  await f.request(`/api/rooms/${room.pin}/start`, { method: 'POST', token: room.hostToken });
+  const state = (await f.request(`/api/rooms/${room.pin}/state`, { token: player })).data;
+  assert.equal(state.question.imageSizeDesktop, 'full');
+  assert.equal(state.question.imageSizeMobile, 'large');
 });

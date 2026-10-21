@@ -134,7 +134,7 @@ export function createApp({ dataDir = process.env.DATA_DIR || path.join(baseDir,
     const result = { revision: room.revision, pin: room.pin, status: room.status, quizTitle: room.quiz.title, hasScoredQuestions: room.quiz.questions.some(q => !unscoredTypes.includes(q.type)), questionIndex: room.index, questionCount: room.quiz.questions.length, players: rank(room), leaderboard: room.scoreboardDeleted ? [] : rank(room), answeredCount: [...room.players.values()].filter(p => p.answer !== undefined).length, scoreboardVisible: room.scoreboardVisible === true, scoreboardDeleted: room.scoreboardDeleted === true, scoreboardShownAt: room.scoreboardVisible ? room.scoreboardShownAt : null, host: !!who.host };
     if (room.status === 'countdown') result.countdownEndsAt = room.countdownEndsAt;
     if (question && ['preview', 'question', 'reveal', 'finished'].includes(room.status)) {
-      result.question = { type: question.type ?? 'quiz', question: question.question, image: question.image || '', imageAlt: question.imageAlt || '', timeLimit: question.timeLimit };
+      result.question = { type: question.type ?? 'quiz', question: question.question, image: question.image || '', imageAlt: question.imageAlt || '', imageSizeDesktop: question.imageSizeDesktop || 'normal', imageSizeMobile: question.imageSizeMobile || 'normal', timeLimit: question.timeLimit };
       if (question.gamble) {
         result.question.gamble = true; result.question.gamblePoints = question.gamblePoints;
         // Players bet before they see the question, so its heading and picture stay hidden while bets are placed.
