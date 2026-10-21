@@ -8,7 +8,7 @@ import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import QRCode from 'qrcode';
-import { sampleQuiz, featureTestQuiz, validateQuiz, validLocation, distanceKm, mapPoints, gambleResult, normalizeAnswer, mediaPathPattern, playerEmojis } from './lib/quiz.mjs';
+import { sampleQuiz, featureTestQuiz, validateQuiz, validLocation, distanceKm, mapPoints, gambleResult, normalizeAnswer, mediaPathPattern, playerEmojis, unscoredTypes } from './lib/quiz.mjs';
 
 const baseDir = path.dirname(fileURLToPath(import.meta.url));
 const secret = () => randomBytes(24).toString('base64url');
@@ -102,7 +102,7 @@ export function createApp({ dataDir = process.env.DATA_DIR || path.join(baseDir,
   catch (error) { if (error.code !== 'ENOENT') throw error; }
   const persistHistory = next => { writeFileSync(`${historyPath}.tmp`, JSON.stringify(next, null, 2), { mode: 0o600 }); renameSync(`${historyPath}.tmp`, historyPath); history = next; };
   const recordHistory = room => {
-    if (room.test || room.historyId || !room.players.size || !room.quiz.questions.some(q => q.type !== 'poll')) return;
+    if (room.test || room.historyId || !room.players.size || !room.quiz.questions.some(q => !unscoredTypes.includes(q.type))) return;
     room.historyId = randomUUID();
     const leaderboard = rank(room).map(({ id: ignored, ...player }) => player);
     persistHistory([{ id: room.historyId, pin: room.pin, quizId: room.quiz.id, quizTitle: room.quiz.title, finishedAt: Date.now(), playerCount: room.players.size, questionCount: room.quiz.questions.length, leaderboard }, ...history].slice(0, 500));
@@ -131,7 +131,7 @@ export function createApp({ dataDir = process.env.DATA_DIR || path.join(baseDir,
   const identity = (room, token) => token && token === room.hostToken ? { host: true } : room.players.get(token);
   const state = (room, who) => {
     const question = room.quiz.questions[room.index];
-    const result = { revision: room.revision, pin: room.pin, status: room.status, quizTitle: room.quiz.title, hasScoredQuestions: room.quiz.questions.some(q => q.type !== 'poll'), questionIndex: room.index, questionCount: room.quiz.questions.length, players: rank(room), leaderboard: room.scoreboardDeleted ? [] : rank(room), answeredCount: [...room.players.values()].filter(p => p.answer !== undefined).length, scoreboardVisible: room.scoreboardVisible === true, scoreboardDeleted: room.scoreboardDeleted === true, scoreboardShownAt: room.scoreboardVisible ? room.scoreboardShownAt : null, host: !!who.host };
+    const result = { revision: room.revision, pin: room.pin, status: room.status, quizTitle: room.quiz.title, hasScoredQuestions: room.quiz.questions.some(q => !unscoredTypes.includes(q.type)), questionIndex: room.index, questionCount: room.quiz.questions.length, players: rank(room), leaderboard: room.scoreboardDeleted ? [] : rank(room), answeredCount: [...room.players.values()].filter(p => p.answer !== undefined).length, scoreboardVisible: room.scoreboardVisible === true, scoreboardDeleted: room.scoreboardDeleted === true, scoreboardShownAt: room.scoreboardVisible ? room.scoreboardShownAt : null, host: !!who.host };
     if (room.status === 'countdown') result.countdownEndsAt = room.countdownEndsAt;
     if (question && ['preview', 'question', 'reveal', 'finished'].includes(room.status)) {
       result.question = { type: question.type ?? 'quiz', question: question.question, image: question.image || '', imageAlt: question.imageAlt || '', timeLimit: question.timeLimit };
@@ -188,10 +188,12 @@ export function createApp({ dataDir = process.env.DATA_DIR || path.join(baseDir,
     clearTimeout(room.timer);
     room.status = 'preview'; room.startedAt = undefined; room.deadline = undefined;
     // Gamble questions get longer to place bets; answers open early once everyone has chosen.
-    const previewMs = room.quiz.questions[room.index].gamble ? gamblePreviewMs : firstPreviewMs;
-    room.previewEndsAt = automatic ? Date.now() + previewMs : undefined;
+    const question = room.quiz.questions[room.index];
+    const previewMs = question.gamble ? gamblePreviewMs : firstPreviewMs;
+    // Slides have no answers to open, so they stay up until the host moves on.
+    room.previewEndsAt = automatic && question.type !== 'slide' ? Date.now() + previewMs : undefined;
     broadcast(room);
-    if (automatic) {
+    if (room.previewEndsAt) {
       room.timer = setTimeout(() => { if (room.status === 'preview' && room.previewEndsAt) openAnswers(room); }, previewMs);
       room.timer.unref();
     }
@@ -301,7 +303,7 @@ export function createApp({ dataDir = process.env.DATA_DIR || path.join(baseDir,
           authorizeHost(req);
           const games = [...rooms.values()].filter(room => !room.test).sort((a, b) => b.touchedAt - a.touchedAt).map(room => ({
             pin: room.pin, quizId: room.quiz.id, quizTitle: room.quiz.title, status: room.status, playerCount: room.players.size,
-            scoreboardAvailable: room.status === 'finished' && room.quiz.questions.some(q => q.type !== 'poll') && !room.scoreboardDeleted,
+            scoreboardAvailable: room.status === 'finished' && room.quiz.questions.some(q => !unscoredTypes.includes(q.type)) && !room.scoreboardDeleted,
             scoreboardVisible: room.scoreboardVisible === true, scoreboardDeleted: room.scoreboardDeleted === true,
             leaderboard: room.status === 'finished' && !room.scoreboardDeleted ? rank(room) : [], hostToken: room.hostToken,
           }));
@@ -409,14 +411,14 @@ export function createApp({ dataDir = process.env.DATA_DIR || path.join(baseDir,
           if (!who.host) fail(403, 'Only the host can control the game.');
           if (action === 'start') { if (room.status !== 'lobby') fail(409, 'Game already started.'); if (!room.players.size) fail(409, 'Wait for at least one player.'); beginCountdown(room); }
           if (action === 'open') {
-            if (room.status === 'preview') openAnswers(room);
+            if (room.status === 'preview') { if (room.quiz.questions[room.index].type === 'slide') advance(room); else openAnswers(room); }
             else if (room.status === 'question') {
               if (Date.now() >= room.deadline || [...room.players.values()].every(player => player.answer !== undefined)) reveal(room);
             } else if (!['reveal', 'finished'].includes(room.status)) fail(409, 'The question is not in preview.');
           }
-          if (action === 'next') { if (room.status === 'question') reveal(room); else if (room.status === 'reveal') advance(room); else fail(409, 'No next question available.'); }
+          if (action === 'next') { if (room.status === 'question') reveal(room); else if (room.status === 'reveal' || (room.status === 'preview' && room.quiz.questions[room.index].type === 'slide')) advance(room); else fail(409, 'No next question available.'); }
           if (action === 'show-scoreboard') {
-            if (room.status !== 'finished' || !room.quiz.questions.some(q => q.type !== 'poll') || room.scoreboardDeleted) fail(409, 'The final scoreboard is not available.');
+            if (room.status !== 'finished' || !room.quiz.questions.some(q => !unscoredTypes.includes(q.type)) || room.scoreboardDeleted) fail(409, 'The final scoreboard is not available.');
             room.scoreboardVisible = !room.scoreboardVisible;
             room.scoreboardShownAt = room.scoreboardVisible ? Date.now() : undefined;
             broadcast(room);
