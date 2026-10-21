@@ -404,7 +404,10 @@ function editor() {
   document.querySelector('#add-question').onclick = () => { readDraft(); draft.questions.push(newQuestion()); editor(); scheduleDraftSave(); app.querySelectorAll('.question-editor')[draft.questions.length - 1].scrollIntoView({block:'center',behavior:'smooth'}); };
   app.querySelectorAll('[data-remove]').forEach(button => button.onclick = () => { readDraft(); draft.questions.splice(Number(button.dataset.remove), 1); editor(); scheduleDraftSave(); });
   app.querySelectorAll('[data-type]').forEach(select => select.onchange = () => {
+    const previous = draft.questions[Number(select.dataset.type)].type || 'quiz';
     readDraft(); const q = draft.questions[Number(select.dataset.type)];
+    // Multiple choice and polls always edit four answers, so pad the list when coming from a type with fewer.
+    if ((q.type === 'quiz' || q.type === 'poll') && previous !== 'quiz' && previous !== 'poll') { q.answers = [0,1,2,3].map(j => (previous === 'true-false' ? '' : q.answers?.[j]) || ''); q.correctIndex = Math.min(q.correctIndex || 0, 3); }
     if (q.type === 'true-false') { q.answers = ['True','False']; q.correctIndex = Math.min(q.correctIndex, 1); }
     else if (q.type === 'picture-choice') { q.answers = ['','']; q.answerImages = [0,1].map(j => q.answerImages?.[j] || ''); q.correctIndex = Math.min(q.correctIndex, 1); }
     else if (q.type === 'match-3') { q.answers = [0,1,2].map(j => q.answers?.[j] || ''); q.answerImages = [0,1,2].map(j => q.answerImages?.[j] || ''); }
