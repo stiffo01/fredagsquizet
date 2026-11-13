@@ -260,7 +260,7 @@ test('mixed question types validate, preserve preview secrecy, and score typed a
   await new Promise(resolve=>setTimeout(resolve,1100));
   let state = (await f.request(`${route}/state`,{token:alice})).data;
   assert.equal(state.status,'preview','preview does not consume the answer timer');
-  assert.deepEqual(Object.keys(state.question).sort(),['type','question','image','imageAlt','timeLimit'].sort());
+  assert.deepEqual(Object.keys(state.question).sort(),['type','question','image','imageAlt','imageSizeDesktop','imageSizeMobile','timeLimit'].sort());
   assert.equal(state.question.revealImage,undefined,'the explanation image stays hidden during preview');
   assert.equal((await host('next')).status,409);
   state = (await host('open')).data;
@@ -569,4 +569,64 @@ test('3 for 3 questions shuffle the pictures, hide the pairs, and score each rig
   assert.equal(zero.self.matchedPairs,0); assert.equal(zero.self.points,0);
   assert.equal(all.players.find(p => p.nickname === 'AllRight').correctAnswers,1);
   assert.equal(all.players.find(p => p.nickname === 'OneRight').correctAnswers,0);
+});
+
+test('slides show picture and text until the host moves on, take no answers, and award no points', async t => {
+  const f = await fixture(t, { firstPreviewMs: 60 });
+  assert.equal((await f.request('/api/quizzes', { method: 'POST', token: 'owner-slide-long-enough', body: { title: 'Slides', questions: [{ type: 'slide', question: '   ' }] } })).status, 400, 'a slide needs text');
+  const slideQuiz = { title: 'Slides', questions: [
+    { type: 'slide', question: 'Welcome!\nThree quick questions coming up.', timeLimit: 20 },
+    { question: 'Two plus two?', answers: ['Four', 'Five'], correctIndex: 0, timeLimit: 10 },
+    { type: 'slide', question: 'Thanks for playing.' },
+  ] };
+  const saved = (await f.request('/api/quizzes', { method: 'POST', token: 'owner-slide-long-enough', body: slideQuiz })).data;
+  assert.equal(saved.questions[0].type, 'slide');
+  assert.equal(saved.questions[0].answers, undefined);
+  const room = (await f.request('/api/rooms', { method: 'POST', body: { quiz: slideQuiz } })).data;
+  const route = `/api/rooms/${room.pin}`;
+  const player = (await f.request(`${route}/join`, { method: 'POST', body: { nickname: 'Reader' } })).data.playerToken;
+  const state = async token => (await f.request(`${route}/state`, { token })).data;
+  await f.request(`${route}/start`, { method: 'POST', token: room.hostToken });
+  const slide = await state(player);
+  assert.equal(slide.status, 'preview');
+  assert.equal(slide.question.type, 'slide');
+  assert.equal(slide.question.question, slideQuiz.questions[0].question);
+  assert.equal(slide.previewEndsAt, undefined, 'a slide never opens answers by itself');
+  assert.equal(slide.hasScoredQuestions, true);
+  await new Promise(resolve => setTimeout(resolve, 120));
+  assert.equal((await state(player)).status, 'preview', 'the slide stays up after the usual preview time');
+  assert.equal((await f.request(`${route}/answer`, { method: 'POST', token: player, body: { answerIndex: 0, questionIndex: 0 } })).status, 409, 'slides take no answers');
+  const next = (await f.request(`${route}/next`, { method: 'POST', token: room.hostToken })).data;
+  assert.equal(next.status, 'preview');
+  assert.equal(next.questionIndex, 1);
+  assert.ok(next.previewEndsAt > Date.now(), 'the following question previews normally');
+  await f.request(`${route}/open`, { method: 'POST', token: room.hostToken });
+  await f.request(`${route}/answer`, { method: 'POST', token: player, body: { answerIndex: 0, questionIndex: 1 } });
+  // The lone player's answer reveals the question at once, so one more Next reaches the closing slide.
+  let lastSlide = (await f.request(`${route}/next`, { method: 'POST', token: room.hostToken })).data;
+  if (lastSlide.status === 'reveal') lastSlide = (await f.request(`${route}/next`, { method: 'POST', token: room.hostToken })).data;
+  assert.equal(lastSlide.status, 'preview');
+  assert.equal(lastSlide.question.type, 'slide');
+  const finished = (await f.request(`${route}/open`, { method: 'POST', token: room.hostToken })).data;
+  assert.equal(finished.status, 'finished', 'opening a slide moves on, so the last slide ends the game');
+  assert.ok(finished.players[0].score >= 990 && finished.players[0].score <= 1000, 'only the real question scored');
+  const unscored = (await f.request('/api/rooms', { method: 'POST', body: { quiz: { title: 'Only slides', questions: [{ type: 'slide', question: 'Hello' }, { type: 'poll', question: 'Mood?', answers: ['Good', 'Great'] }] } } })).data;
+  assert.equal((await f.request(`/api/rooms/${unscored.pin}/state`, { token: unscored.hostToken })).data.hasScoredQuestions, false);
+});
+
+test('question pictures carry separate desktop and phone sizes into the game', async t => {
+  const f = await fixture(t);
+  const image = `/media/${'a'.repeat(64)}.png`;
+  const token = 'owner-sizes-long-enough';
+  assert.equal((await f.request('/api/quizzes', { method: 'POST', token, body: { title: 'Sizes', questions: [{ ...quiz.questions[0], image, imageSizeDesktop: 'huge' }] } })).status, 400, 'unknown sizes are rejected');
+  const saved = (await f.request('/api/quizzes', { method: 'POST', token, body: { title: 'Sizes', questions: [{ ...quiz.questions[0], image, imageSizeDesktop: 'full', imageSizeMobile: 'large' }, quiz.questions[1]] } })).data;
+  assert.equal(saved.questions[0].imageSizeDesktop, 'full');
+  assert.equal(saved.questions[0].imageSizeMobile, 'large');
+  assert.equal(saved.questions[1].imageSizeDesktop, 'normal', 'sizes default to normal');
+  const room = (await f.request('/api/rooms', { method: 'POST', body: { quiz: saved } })).data;
+  const player = (await f.request(`/api/rooms/${room.pin}/join`, { method: 'POST', body: { nickname: 'Viewer' } })).data.playerToken;
+  await f.request(`/api/rooms/${room.pin}/start`, { method: 'POST', token: room.hostToken });
+  const state = (await f.request(`/api/rooms/${room.pin}/state`, { token: player })).data;
+  assert.equal(state.question.imageSizeDesktop, 'full');
+  assert.equal(state.question.imageSizeMobile, 'large');
 });
