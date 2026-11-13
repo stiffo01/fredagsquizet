@@ -101,6 +101,12 @@ export function createApp({ dataDir = process.env.DATA_DIR || path.join(baseDir,
   try { history = JSON.parse(readFileSync(historyPath, 'utf8')); if (!Array.isArray(history)) throw new Error('Invalid leaderboard history'); }
   catch (error) { if (error.code !== 'ENOENT') throw error; }
   const persistHistory = next => { writeFileSync(`${historyPath}.tmp`, JSON.stringify(next, null, 2), { mode: 0o600 }); renameSync(`${historyPath}.tmp`, historyPath); history = next; };
+  // Unfinished editor drafts are kept on the server so nothing is lost before a quiz is complete.
+  const draftsPath = path.join(dataDir, 'drafts.json');
+  let drafts = {};
+  try { drafts = JSON.parse(readFileSync(draftsPath, 'utf8')); if (!drafts || typeof drafts !== 'object' || Array.isArray(drafts)) throw new Error('Invalid draft store'); }
+  catch (error) { if (error.code !== 'ENOENT') throw error; }
+  const persistDrafts = next => { writeFileSync(`${draftsPath}.tmp`, JSON.stringify(next), { mode: 0o600 }); renameSync(`${draftsPath}.tmp`, draftsPath); drafts = next; };
   const recordHistory = room => {
     if (room.test || room.historyId || !room.players.size || !room.quiz.questions.some(q => !unscoredTypes.includes(q.type))) return;
     room.historyId = randomUUID();
@@ -287,6 +293,22 @@ export function createApp({ dataDir = process.env.DATA_DIR || path.join(baseDir,
         if (!existing) fail(404, 'Quiz not found.');
         if (req.method === 'PUT') { const quiz = validateQuiz(await body(req), id); persist(saved.map(q => q === existing ? { ...quiz, owner: existing.owner || hash } : q)); return send(res, 200, quiz); }
         if (req.method === 'DELETE') { persist(saved.filter(q => q !== existing)); return send(res, 200, { ok: true }); }
+      }
+      if (parts[0] === 'api' && parts[1] === 'drafts') {
+        authorizeHost(req);
+        const key = parts[2];
+        if (parts.length !== 3 || !/^[A-Za-z0-9_-]{1,100}$/.test(key)) fail(404, 'Endpoint not found.');
+        if (req.method === 'GET') { if (!Object.hasOwn(drafts, key)) fail(404, 'Draft not found.'); return send(res, 200, drafts[key]); }
+        if (req.method === 'PUT') {
+          const input = await body(req);
+          if (!input.draft || typeof input.draft !== 'object' || Array.isArray(input.draft) || !Array.isArray(input.draft.questions)) fail(400, 'Expected a draft.');
+          if (!Object.hasOwn(drafts, key) && Object.keys(drafts).length >= 200) fail(409, 'Draft limit reached.');
+          const savedAt = Number.isFinite(input.savedAt) ? input.savedAt : Date.now();
+          persistDrafts({ ...drafts, [key]: { draft: input.draft, savedAt } });
+          return send(res, 200, { ok: true, savedAt });
+        }
+        if (req.method === 'DELETE') { if (Object.hasOwn(drafts, key)) { const { [key]: removed, ...rest } = drafts; persistDrafts(rest); } return send(res, 200, { ok: true }); }
+        fail(404, 'Endpoint not found.');
       }
       if (parts[0] === 'api' && parts[1] === 'history') {
         authorizeHost(req);
