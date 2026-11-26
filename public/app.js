@@ -604,8 +604,8 @@ function questionContent(s) {
     const controls = host ? `<p class="waiting-answer">${s.betCount ?? 0} / ${s.players.length} players have chosen</p><button class="btn light" data-action="open">Open answers →</button>` : choice || `<div class="gamble-choices"><button class="btn light" data-bet="true">🎲 Bet ${stake}<small>Right: +${(2 * q.gamblePoints).toLocaleString()} · Wrong: −${stake}</small></button><button class="btn ghost" data-bet="false">Play safe<small>Right: +${stake} · Wrong: 0</small></button></div>`;
     return `<p class="eyebrow">🎲 Gamble · ${escapeHTML(questionTypes[q.type] || questionTypes.quiz)} · Question ${s.questionIndex + 1} of ${s.questionCount}</p><h1>Do you dare to bet?</h1><p class="subtitle">The next question is worth ${stake} points, with no speed bonus. Bet them to win double, but a wrong or missing answer loses ${stake} points.</p>${s.previewEndsAt ? '<div class="preview-countdown"><span>Answers in</span><strong id="preview-countdown">15</strong></div>' : ''}${controls}`;
   }
-  const heading = `<p class="eyebrow">${q.gamble ? '🎲 Gamble · ' : ''}${escapeHTML(questionTypes[q.type] || questionTypes.quiz)} · Question ${s.questionIndex + 1} of ${s.questionCount}</p><h1>${escapeHTML(q.question)}</h1>${image}`;
-  if (preview) return `${heading}<div class="preview-note"><span class="badge">TAKE A LOOK</span>${s.previewEndsAt ? '<div class="preview-countdown"><span>Answers in</span><strong id="preview-countdown">5</strong></div>' : '<p>Read the question and study the picture. Answers will open when the host is ready.</p>'}</div>${host ? `<button class="btn light${mapPin ? ' map-host-action' : ''}" data-action="open">Open answers →</button>` : ''}`;
+  const heading = `<p class="eyebrow">${q.gamble ? '🎲 Gamble · ' : ''}${escapeHTML(questionTypes[q.type] || questionTypes.quiz)} · Question ${s.questionIndex + 1} of ${s.questionCount}</p><h1${q.question.length > 90 ? ' class="long"' : ''}>${escapeHTML(q.question)}</h1>`;
+  if (preview) return `${heading}${image}<div class="preview-note"><span class="badge">TAKE A LOOK</span>${s.previewEndsAt ? '<div class="preview-countdown"><span>Answers in</span><strong id="preview-countdown">5</strong></div>' : '<p>Read the question and study the picture. Answers will open when the host is ready.</p>'}</div>${host ? `<button class="btn light${mapPin ? ' map-host-action' : ''}" data-action="open">Open answers →</button>` : ''}`;
   let controls;
   if (mapPin) {
     const editable = !host && !reveal && !s.self?.answered;
@@ -630,7 +630,12 @@ function questionContent(s) {
   const betNote = q.gamble && !reveal ? `<p class="muted-white">${host ? `🎲 Gamble round · ${stake} points` : s.self.bet ? `🎲 You bet ${stake} points` : `Playing safe for ${stake} points`}</p>` : '';
   const meta = answerOnly ? '' : `<div class="question-meta"><div class="timer" aria-label="Seconds remaining" id="timer">${reveal ? '✓' : q.timeLimit}</div><div class="progress" aria-hidden="true"><div id="time-progress" style="width:${reveal ? 0 : 100}%"></div></div><span class="answer-count">${s.answeredCount} / ${s.players.length} ${poll ? 'voted' : 'answered'}</span></div>`;
   const answerView = !host && s.status === 'question' && q.answers?.length >= 2 ? `<div class="answer-view-control"><button class="btn ghost" data-toggle-answer-view aria-pressed="${answerOnly}">${answerOnly ? 'Show question + answers' : 'Show answers only'}</button></div>` : '';
-  return `${showHeading ? heading : ''}${betNote}${meta}${answerView}${controls}${feedback}${myStanding}${(() => { const board = reveal && !poll ? `<div class="between-board"><p class="eyebrow between-board-title">Top 5</p>${leaderboard(s.leaderboard)}</div>` : ''; return revealImage && board ? `<div class="reveal-extras">${revealImage}${board}</div>` : revealImage + board; })()}${host ? `<div class="lobby-actions${mapPin ? ' map-host-actions' : ''}"><button class="btn light" data-action="next">${!reveal ? (poll ? 'Show votes' : 'Reveal answers') : s.questionIndex + 1 === s.questionCount ? 'Show podium 🏆' : 'Next question →'}</button><button class="btn ghost" data-action="end">End game</button></div>` : reveal ? '<p class="muted-white">Waiting for the host…</p>' : ''}`;
+  // The reveal picture and the top 5 form a side column next to the answers on wide screens (see .stage-body in style.css).
+  const board = reveal && !poll ? `<div class="between-board"><p class="eyebrow between-board-title">Top 5</p>${leaderboard(s.leaderboard)}</div>` : '';
+  const side = revealImage || board ? `<aside class="stage-side">${revealImage}${board}</aside>` : '';
+  const actions = host ? `<div class="lobby-actions${mapPin ? ' map-host-actions' : ''}"><button class="btn light" data-action="next">${!reveal ? (poll ? 'Show votes' : 'Reveal answers') : s.questionIndex + 1 === s.questionCount ? 'Show podium 🏆' : 'Next question →'}</button><button class="btn ghost" data-action="end">End game</button></div>` : reveal ? '<p class="muted-white waiting-host">Waiting for the host…</p>' : '';
+  // Players see their own result and standing first, above the answers.
+  return `${showHeading ? heading : ''}<div class="stage-body${side ? ' has-side' : ''}"><div class="stage-main">${showHeading ? image : ''}${betNote}${meta}${answerView}${feedback}${myStanding}${controls}</div>${side}</div>${actions}`;
 }
 const pendingPins = new Map();
 // 3 for 3 picks stay in the browser until locked in, so the regular re-renders keep them.
@@ -669,6 +674,22 @@ function drawPixelPictures() {
     context.drawImage(small, 0, 0, width, height);
   });
 }
+// Host lobby: the player list gets the space left under the QR code. Chips that do not fit are folded into "+N more"
+// so the start button never moves off the screen, however many players join.
+function fitLobbyChips() {
+  const list = document.querySelector('.stage-players');
+  if (!list) return;
+  list.querySelector('.more-chip')?.remove();
+  const chips = [...list.querySelectorAll('.player-chip')];
+  chips.forEach(chip => { chip.hidden = false; });
+  if (list.scrollHeight <= list.clientHeight + 1) return;
+  const more = document.createElement('span');
+  more.className = 'player-chip more-chip';
+  list.append(more);
+  let hidden = 0;
+  while (chips.length > 1 && list.scrollHeight > list.clientHeight + 1) { chips.pop().hidden = true; more.textContent = `+${++hidden} more`; }
+}
+window.addEventListener('resize', fitLobbyChips);
 function renderRoom() {
   clearQuizMaps();
   const oldInput = document.querySelector('#typed-answer');
@@ -700,6 +721,7 @@ function renderRoom() {
     content = `<div class="podium-icon" aria-hidden="true">🏆</div><p class="eyebrow">That's a wrap</p><h1>Thanks for playing!</h1><p class="subtitle">${escapeHTML(s.quizTitle)}</p>${finalStanding}${s.hasScoredQuestions ? board : '<p class="muted-white">All votes are in. Thanks for sharing your thoughts.</p>'}<div class="lobby-actions final-actions">${s.hasScoredQuestions ? scoreboardControls : ''}${backLink}</div>`;
   }
   app.innerHTML = `<section class="room">${bar}${testBar}${content}</section>`;
+  fitLobbyChips();
   updateScoreboardReveal();
   drawPixelPictures();
   const typedInput = document.querySelector('#typed-answer');
