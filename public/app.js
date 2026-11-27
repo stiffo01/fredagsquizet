@@ -568,7 +568,7 @@ async function connectRoom(role, pin, version) {
 
 function leaderboard(players, {full=false, showCorrect=false}={}) {
   const rows = full ? players : players.slice(0,5);
-  return `<div class="ranking${showCorrect?' final-ranking':''}">${rows.map((p,i)=>`<div class="rank-row"><span class="position">${p.rank || i+1}</span><span class="player-emoji" aria-hidden="true">${escapeHTML(p.emoji || '😀')}</span><strong>${escapeHTML(p.nickname)}${p.id===roomState.self?.id?' (you)':''}</strong>${showCorrect?`<span class="correct-count">${p.correctAnswers} correct</span>`:''}<span class="score">${p.score.toLocaleString()} <small>pts</small></span></div>`).join('')}</div>`;
+  return `<div class="ranking${showCorrect?' final-ranking':''}">${rows.map((p,i)=>`<div class="rank-row"${showCorrect?` style="--rank-index:${i}"`:''}><span class="position">${p.rank || i+1}</span><span class="player-emoji" aria-hidden="true">${escapeHTML(p.emoji || '😀')}</span><strong>${escapeHTML(p.nickname)}${p.id===roomState.self?.id?' (you)':''}</strong>${showCorrect?`<span class="correct-count">${p.correctAnswers} correct</span>`:''}<span class="score">${p.score.toLocaleString()} <small>pts</small></span></div>`).join('')}</div>`;
 }
 function updateScoreboardReveal() {
   const target = document.querySelector('#scoreboard-reveal');
@@ -579,11 +579,15 @@ function updateScoreboardReveal() {
   if(target.dataset.stageKey===key)return;
   target.dataset.stageKey=key;
   if(stage===3) {
-    target.innerHTML=leaderboard(roomState.leaderboard,{full:true,showCorrect:true});
+    const winner = roomState.leaderboard[0];
+    target.innerHTML=`<div class="scoreboard-finale"><div class="confetti" aria-hidden="true">${'<i></i>'.repeat(18)}</div>${winner?`<div class="winner-banner"><span class="winner-crown" aria-hidden="true">👑</span><p><strong>${escapeHTML(winner.nickname)}</strong> takes the crown!</p><span>${escapeHTML(winner.emoji||'😀')}</span></div>`:''}${leaderboard(roomState.leaderboard,{showCorrect:true})}</div>`;
+    target.scrollTop=0; target.closest('.room').scrollTop=0;
     return;
   }
   const place = 3-stage, player = roomState.leaderboard[place-1];
-  target.innerHTML=`<div class="podium-reveal place-${place}">${place===1?'<div class="fireworks" aria-hidden="true"><i></i><i></i><i></i></div>':''}<p class="place-label">${place}${place===1?'st':place===2?'nd':'rd'} place</p>${player?`<div class="podium-player"><span aria-hidden="true">${escapeHTML(player.emoji||'😀')}</span><h2>${escapeHTML(player.nickname)}</h2><p>${player.correctAnswers} correct answers · ${player.score.toLocaleString()} points</p></div>`:'<h2>No player in this place</h2>'}</div>`;
+  const medal = ['','🥇','🥈','🥉'][place];
+  target.innerHTML=`<div class="podium-reveal place-${place}"><div class="podium-glow" aria-hidden="true"></div><div class="podium-particles" aria-hidden="true">${'<i></i>'.repeat(12)}</div>${place===1?'<div class="fireworks" aria-hidden="true"><i></i><i></i><i></i></div>':''}<div class="reveal-progress" aria-hidden="true"><i class="done"></i><i class="${stage>0?'done':''}"></i><i class="${stage>1?'done':''}"></i></div><div class="place-medal" aria-hidden="true">${medal}</div><p class="place-label">${place}${place===1?'st':place===2?'nd':'rd'} place</p>${player?`<div class="podium-player"><span class="podium-emoji" aria-hidden="true">${escapeHTML(player.emoji||'😀')}</span><h2>${escapeHTML(player.nickname)}</h2><p><strong>${player.score.toLocaleString()}</strong> points <span>· ${player.correctAnswers} correct</span></p></div>`:'<h2>No player in this place</h2>'}<div class="podium-step" aria-hidden="true"><span>${place}</span></div></div>`;
+  target.scrollTop=0; target.closest('.room').scrollTop=0;
 }
 function questionContent(s) {
   const q = s.question, host = s.host, preview = s.status === 'preview', reveal = s.status === 'reveal';
@@ -713,7 +717,7 @@ function renderRoom() {
   } else if (isQuestion || isReveal || s.status === 'preview') {
     content = questionContent(s);
   } else {
-    const board = s.scoreboardDeleted ? '<p class="muted-white">The scoreboard has been cleared.</p>' : s.scoreboardVisible ? '<div id="scoreboard-reveal"></div>' : '<p class="muted-white">The final scoreboard is ready when you are.</p>';
+    const board = s.scoreboardDeleted ? '<p class="muted-white">The scoreboard has been cleared.</p>' : s.scoreboardVisible ? '<div id="scoreboard-reveal" aria-live="polite" aria-label="Final scoreboard reveal"></div>' : '<p class="muted-white">The final scoreboard is ready when you are.</p>';
     const scoreboardControls = host && s.hasScoredQuestions && !s.scoreboardDeleted ? `<button class="btn light" data-action="show-scoreboard">${s.scoreboardVisible ? 'Hide scoreboard' : 'Show scoreboard'}</button><button class="btn ghost" data-action="clear-scoreboard">Delete scoreboard</button>` : '';
     const finalMe = !host && s.self && s.hasScoredQuestions && !s.scoreboardDeleted ? s.players.find(p => p.id === s.self.id) : null;
     const finalStanding = finalMe ? `<div class="my-standing" aria-label="Your final position and score"><div><small>Final position</small><strong>#${finalMe.rank}<span> of ${s.players.length}</span></strong></div><div><small>Final score</small><strong>${finalMe.score.toLocaleString()}<span> pts</span></strong></div></div>` : '';
